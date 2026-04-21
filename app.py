@@ -3,13 +3,16 @@ app.py — Flask web server for NBA predictions
 """
 
 import time
+import json
 import warnings
 import numpy as np
 import pandas as pd
 import joblib
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from flask import Flask, render_template, jsonify
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask_cors import CORS
 
 from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
 from nba_api.live.nba.endpoints import boxscore as live_boxscore
@@ -17,10 +20,12 @@ from nba_api.live.nba.endpoints import boxscore as live_boxscore
 warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
+CORS(app, origins=["https://ghoqst.github.io"])
 
-MODELS_DIR = Path("models")
-RAW        = Path("data/raw")
-SLEEP      = 0.6
+MODELS_DIR   = Path("models")
+RAW          = Path("data/raw")
+HISTORY_FILE = Path("data/history.json")
+SLEEP        = 0.6
 
 FEATURE_COLS = [
     "DIFF_OFF_RATING", "DIFF_DEF_RATING", "DIFF_NET_RATING", "DIFF_PACE",
@@ -216,6 +221,89 @@ def build_comparison(home_tri, away_tri, home_id, away_id,
         "rows":           rows,
     }
 
+# ── history helpers ──────────────────────────────────────────────────────────
+
+def load_history():
+    if not HISTORY_FILE.exists():
+        return {}
+    with open(HISTORY_FILE) as f:
+        return json.load(f)
+
+def save_results(date_str, games):
+    """Save final games for a given date to history.json."""
+    final_games = [g for g in games if g.get("game_status") == 3 and "pred_winner" in g]
+    if not final_games:
+        return
+    history = load_history()
+    history[date_str] = final_games
+    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f)
+
+def scheduled_save():
+    """Background job: fetch today's final games and save to history."""
+    try:
+        time.sleep(SLEEP)
+        sb    = live_scoreboard.ScoreBoard()
+        games = sb.get_dict()["scoreboard"]["games"]
+    except Exception as e:
+        print(f"[scheduler] scoreboard error: {e}")
+        return
+
+    results = []
+    for g in games:
+        home_id   = g["homeTeam"]["teamId"]
+        away_id   = g["awayTeam"]["teamId"]
+        home_tri  = g["homeTeam"]["teamTricode"]
+        away_tri  = g["awayTeam"]["teamTricode"]
+        game_status = g["gameStatus"]
+        home_score  = g["homeTeam"]["score"]
+        away_score  = g["awayTeam"]["score"]
+        if game_status != 3:
+            continue
+        try:
+            feats = build_features(home_id, away_id)
+            X = pd.DataFrame([feats], columns=FEATURE_COLS).values
+            probs, preds = {}, {}
+            for name, model in MODELS.items():
+                p = model.predict_proba(X)[0, 1]
+                probs[name] = round(float(p), 3)
+                preds[name] = int(p >= 0.5)
+            margin      = float(MARGIN_MODEL.predict(X)[0])
+            home_prob   = probs["Ensemble"]
+            away_prob   = round(1 - home_prob, 3)
+            pred_winner = home_tri if home_prob >= 0.5 else away_tri
+            agreement   = sum(
+                preds[m] == preds["Ensemble"]
+                for m in ["LogisticRegression", "RandomForest", "GradientBoosting"]
+            )
+            results.append({
+                "home_tri": home_tri, "away_tri": away_tri,
+                "home_name": g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"],
+                "away_name": g["awayTeam"]["teamCity"] + " " + g["awayTeam"]["teamName"],
+                "home_rec": f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}",
+                "away_rec": f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}",
+                "status": g["gameStatusText"], "game_status": game_status,
+                "game_id": g["gameId"],
+                "home_id": home_id, "away_id": away_id,
+                "home_score": home_score, "away_score": away_score,
+                "home_prob": home_prob, "away_prob": away_prob,
+                "pred_winner": pred_winner,
+                "margin": round(margin, 1),
+                "agreement": f"{agreement}/3",
+                "prob_lr": probs["LogisticRegression"],
+                "prob_rf": probs["RandomForest"],
+                "prob_gb": probs["GradientBoosting"],
+                "home_b2b": bool(feats["HOME_B2B"]),
+                "away_b2b": bool(feats["AWAY_B2B"]),
+            })
+        except Exception as e:
+            print(f"[scheduler] prediction error for {home_tri} vs {away_tri}: {e}")
+
+    if results:
+        save_results(date.today().isoformat(), results)
+        print(f"[scheduler] saved {len(results)} final games for {date.today().isoformat()}")
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -357,6 +445,8 @@ def predictions():
                 "error": str(e),
             })
 
+    save_results(date.today().isoformat(), results)
+
     return jsonify({
         "games": results,
         "date": date.today().isoformat(),
@@ -364,8 +454,22 @@ def predictions():
     })
 
 
+@app.route("/api/yesterday")
+def yesterday():
+    history = load_history()
+    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+    games = history.get(yesterday_str, [])
+    return jsonify({"games": games, "date": yesterday_str})
+
+
 if __name__ == "__main__":
     import threading, webbrowser
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(scheduled_save, "cron", hour=0, minute=5)
+    scheduler.start()
+    print("Scheduler started — saving results nightly at 12:05 AM.")
+
     def open_browser():
         webbrowser.open("http://localhost:5000")
     threading.Timer(1.2, open_browser).start()
