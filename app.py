@@ -467,8 +467,12 @@ if __name__ == "__main__":
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(scheduled_save, "cron", hour=0, minute=5)
+    scheduler.add_job(
+        lambda: __import__('requests').get("https://nba-winner-prediction.onrender.com/", timeout=10),
+        "interval", minutes=10
+    )
     scheduler.start()
-    print("Scheduler started — saving results nightly at 12:05 AM.")
+    print("Scheduler started — saving results nightly at 12:05 AM, pinging every 10 min.")
 
     def open_browser():
         webbrowser.open("http://localhost:5000")
