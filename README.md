@@ -1,5 +1,7 @@
 # NBA Game Prediction
 
+**Live Site:** [therodma.github.io/NBA_Winner_Prediction](https://therodma.github.io/NBA_Winner_Prediction)
+
 A machine learning web app that predicts NBA game outcomes using real-time data from the NBA API.
 
 ## Features
