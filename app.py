@@ -20,7 +20,7 @@ from nba_api.live.nba.endpoints import boxscore as live_boxscore
 warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
-CORS(app, origins=["https://ghoqst.github.io"])
+CORS(app)
 
 MODELS_DIR   = Path("models")
 RAW          = Path("data/raw")
