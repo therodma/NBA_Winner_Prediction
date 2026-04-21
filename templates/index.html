@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NBA Predictions</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:           #f7f3ec;
+      --bg-card:      #fdfaf5;
+      --bg-section:   #f2ede3;
+      --bg-footer:    #f0ebe0;
+      --border:       #e2d9c8;
+      --border-light: #ede8dc;
+      --ink:          #1c1917;
+      --ink-2:        #57534e;
+      --ink-3:        #a8a29e;
+      --green:        #3d6b50;
+      --red:          #9b3a2a;
+      --live-dot:     #c0392b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-weight: 300;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── header ── */
+    header {
+      padding: 48px 0 36px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+    }
+    .header-eyebrow {
+      font-size: 0.65rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 10px;
+    }
+    header h1 {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 2.4rem;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+    }
+    header h1 em { font-style: italic; color: var(--ink-2); }
+    .header-sub {
+      margin-top: 10px;
+      font-size: 0.78rem;
+      color: var(--ink-3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .header-sub .sep { color: var(--border); }
+
+    /* ── main ── */
+    main {
+      flex: 1;
+      width: 100%;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 44px 24px 64px;
+    }
+
+    .section-label {
+      font-size: 0.62rem;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-light);
+    }
+
+    /* ── states ── */
+    .state { text-align: center; padding: 100px 20px; color: var(--ink-3); }
+    .state p { font-family: 'Playfair Display', serif; font-style: italic; font-size: 1.1rem; }
+    .spinner {
+      width: 24px; height: 24px;
+      border: 1.5px solid var(--border);
+      border-top-color: var(--ink-3);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── cards ── */
+    .games { display: flex; flex-direction: column; gap: 16px; }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      transition: box-shadow 0.2s;
+    }
+    .card:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.07); }
+
+    /* ── matchup row ── */
+    .matchup {
+      display: grid;
+      grid-template-columns: 1fr 140px 1fr;
+      align-items: center;
+      padding: 28px 32px 20px;
+      gap: 8px;
+    }
+    .team-block { display: flex; flex-direction: column; gap: 4px; }
+    .team-block.right { text-align: right; }
+
+    .team-tri {
+      font-family: 'Playfair Display', serif;
+      font-size: 2rem;
+      font-weight: 500;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+    .team-full { font-size: 0.72rem; color: var(--ink-2); font-weight: 400; }
+    .team-record { font-size: 0.68rem; color: var(--ink-3); }
+
+    .b2b-tag {
+      display: inline-block;
+      font-size: 0.58rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--red);
+      border: 1px solid var(--red);
+      border-radius: 2px;
+      padding: 1px 5px;
+      margin-top: 3px;
+      width: fit-content;
+    }
+    .team-block.right .b2b-tag { margin-left: auto; }
+
+    /* final score display */
+    .final-score {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.6rem;
+      font-weight: 500;
+      line-height: 1;
+      color: var(--ink);
+    }
+    .final-score .winner-score { color: var(--ink); }
+    .final-score .loser-score  { color: var(--ink-3); font-weight: 400; }
+
+    /* center column */
+    .matchup-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .vs-text {
+      font-size: 0.65rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .game-time { font-size: 0.72rem; color: var(--ink-2); text-align: center; }
+
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.65rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--live-dot);
+    }
+    .live-badge::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--live-dot);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .final-badge {
+      font-size: 0.62rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+
+    /* prediction result badge */
+    .result-badge {
+      font-size: 0.6rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 2px;
+      margin-top: 2px;
+    }
+    .result-badge.correct { background: #e8f2ec; color: var(--green); }
+    .result-badge.wrong   { background: #f5ece9; color: var(--red); }
+
+    /* ── prob bar ── */
+    .prob-row { padding: 0 32px 22px; }
+    .prob-numbers {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 7px;
+    }
+    .prob-num { font-size: 0.78rem; color: var(--ink-3); }
+    .prob-num.favored { font-size: 0.9rem; font-weight: 500; color: var(--ink); }
+    .prob-label-center {
+      font-size: 0.6rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .bar-track {
+      height: 3px;
+      background: var(--border-light);
+      border-radius: 99px;
+      position: relative;
+      overflow: hidden;
+    }
+    .bar-fill {
+      position: absolute;
+      top: 0; height: 100%;
+      border-radius: 99px;
+      transition: width 0.7s cubic-bezier(0.4,0,0.2,1);
+    }
+    .bar-fill.from-left  { left: 0; }
+    .bar-fill.from-right { right: 0; }
+
+    /* ── card stats row ── */
+    .card-stats {
+      border-top: 1px solid var(--border-light);
+      background: var(--bg);
+      padding: 14px 32px;
+      display: flex;
+      gap: 0;
+    }
+    .stat-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding-right: 20px;
+    }
+    .stat-item:not(:last-child) {
+      border-right: 1px solid var(--border-light);
+      margin-right: 20px;
+    }
+    .stat-label {
+      font-size: 0.58rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .label-hint {
+      font-size: 0.58rem;
+      font-weight: 300;
+      letter-spacing: 0.04em;
+      text-transform: none;
+      color: var(--ink-3);
+    }
+    .stat-value { font-size: 0.82rem; color: var(--ink); }
+    .stat-value.pick { font-weight: 500; color: var(--green); }
+
+    .pips { display: flex; gap: 4px; align-items: center; margin-top: 2px; }
+    .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+    .pip.on { background: var(--green); }
+
+    /* ── box score toggle ── */
+    .boxscore-toggle {
+      border-top: 1px solid var(--border-light);
+      background: var(--bg);
+      padding: 0;
+    }
+
+    .toggle-btn {
+      width: 100%;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 11px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.62rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      transition: color 0.15s;
+    }
+    .toggle-btn:hover { color: var(--ink-2); }
+
+    .toggle-icon {
+      font-size: 0.7rem;
+      transition: transform 0.2s;
+      display: inline-block;
+    }
+    .toggle-btn.open .toggle-icon { transform: rotate(180deg); }
+
+    /* ── box score panel ── */
+    .boxscore-panel {
+      display: none;
+      border-top: 1px solid var(--border-light);
+    }
+    .boxscore-panel.open { display: block; }
+
+    .bs-team-section { padding: 20px 32px; }
+    .bs-team-section:not(:last-child) { border-bottom: 1px solid var(--border-light); }
+
+    .bs-team-header {
+      font-size: 0.62rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 12px;
+    }
+
+    .bs-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+    }
+    .bs-table th {
+      font-size: 0.58rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      text-align: right;
+      padding: 0 6px 8px;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .bs-table th:first-child { text-align: left; padding-left: 0; }
+
+    .bs-table td {
+      text-align: right;
+      padding: 7px 6px;
+      color: var(--ink-2);
+      border-bottom: 1px solid var(--border-light);
+      font-weight: 300;
+    }
+    .bs-table td:first-child { text-align: left; padding-left: 0; color: var(--ink); }
+    .bs-table tr:last-child td { border-bottom: none; }
+
+    .bs-table tr.starter td:first-child { font-weight: 400; }
+
+    .bs-pts { font-weight: 500; color: var(--ink) !important; }
+    .bs-pm-pos { color: var(--green) !important; }
+    .bs-pm-neg { color: var(--red) !important; }
+
+    .bs-loading {
+      padding: 24px 32px;
+      font-size: 0.78rem;
+      color: var(--ink-3);
+      font-style: italic;
+    }
+
+    /* ── error ── */
+    .card-error {
+      padding: 20px 32px;
+      font-size: 0.78rem;
+      color: var(--ink-3);
+      font-style: italic;
+    }
+
+    /* ── footer ── */
+    footer {
+      background: var(--bg-footer);
+      border-top: 1px solid var(--border);
+      padding: 24px;
+      text-align: center;
+    }
+    footer p { font-size: 0.68rem; color: var(--ink-3); line-height: 1.7; }
+    footer strong { font-weight: 500; color: var(--ink-2); }
+
+    /* ── responsive ── */
+    @media (max-width: 600px) {
+      header { padding: 36px 20px 28px; }
+      header h1 { font-size: 1.8rem; }
+      main { padding: 32px 16px 48px; }
+      .matchup { padding: 20px 16px 16px; grid-template-columns: 1fr 100px 1fr; }
+      .team-tri { font-size: 1.5rem; }
+      .team-full { display: none; }
+      .prob-row { padding: 0 16px 18px; }
+      .card-stats { padding: 12px 16px; flex-wrap: wrap; gap: 12px; }
+      .stat-item { flex: none; width: calc(50% - 6px); border-right: none !important; margin-right: 0 !important; padding-right: 0; }
+      .bs-team-section { padding: 16px; }
+      .toggle-btn { padding: 11px 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-eyebrow">Machine Learning · {{ today }}</div>
+  <h1>NBA <em>Game Predictions</em></h1>
+  <div class="header-sub">
+    <span id="updated-time">Loading&hellip;</span>
+    <span class="sep">|</span>
+    <span>71% accuracy &middot; 2024&ndash;25 season</span>
+    <span class="sep">|</span>
+    <span>Refreshes every 5 min</span>
+  </div>
+</header>
+
+<main>
+  <div class="section-label" id="games-label">Today's Games</div>
+  <div id="content">
+    <div class="state">
+      <div class="spinner"></div>
+      <p>Fetching today's games&hellip;</p>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <p>
+    <strong>Ensemble model</strong> &mdash; Logistic Regression · Random Forest · Gradient Boosting<br>
+    Features: season ratings, rolling 10-game form, rest days, H2H record &middot; Not a betting service
+  </p>
+</footer>
+
+<script>
+  const COLORS = {
+    ATL:'#C1D32F',BOS:'#007A33',BKN:'#1D1160',CHA:'#1D1160',CHI:'#CE1141',
+    CLE:'#860038',DAL:'#00538C',DEN:'#0E2240',DET:'#C8102E',GSW:'#1D428A',
+    HOU:'#CE1141',IND:'#002D62',LAC:'#C8102E',LAL:'#552583',MEM:'#5D76A9',
+    MIA:'#98002E',MIL:'#00471B',MIN:'#0C2340',NOP:'#0C2340',NYK:'#006BB6',
+    OKC:'#007AC1',ORL:'#0077C0',PHI:'#006BB6',PHX:'#1D1160',POR:'#E03A3E',
+    SAC:'#5A2D81',SAS:'#8A8D8F',TOR:'#CE1141',UTA:'#002B5C',WAS:'#002B5C',
+  };
+
+  const pct = p => Math.round(p * 100) + '%';
+
+  /* ── box score fetch & render ── */
+  async function loadBoxScore(gameId, panelEl) {
+    panelEl.innerHTML = '<div class="bs-loading">Loading box score&hellip;</div>';
+    try {
+      const res  = await fetch(`/api/boxscore/${gameId}`);
+      const data = await res.json();
+      if (data.error) { panelEl.innerHTML = `<div class="bs-loading">${data.error}</div>`; return; }
+      panelEl.innerHTML = renderBoxScore(data);
+    } catch(e) {
+      panelEl.innerHTML = '<div class="bs-loading">Could not load box score.</div>';
+    }
+  }
+
+  function playerRow(p) {
+    const pmClass = p.pm > 0 ? 'bs-pm-pos' : p.pm < 0 ? 'bs-pm-neg' : '';
+    const pmStr   = p.pm > 0 ? `+${p.pm}` : `${p.pm}`;
+    return `<tr class="${p.starter ? 'starter' : ''}">
+      <td>${p.name}</td>
+      <td>${p.min}</td>
+      <td class="bs-pts">${p.pts}</td>
+      <td>${p.reb}</td>
+      <td>${p.ast}</td>
+      <td>${p.stl}</td>
+      <td>${p.blk}</td>
+      <td>${p.tov}</td>
+      <td>${p.fg}</td>
+      <td>${p['3p']}</td>
+      <td>${p.ft}</td>
+      <td class="${pmClass}">${pmStr}</td>
+    </tr>`;
+  }
+
+  function teamTable(tri, players) {
+    return `
+    <div class="bs-team-section">
+      <div class="bs-team-header">${tri}</div>
+      <table class="bs-table">
+        <thead><tr>
+          <th>Player</th><th>Min</th><th>Pts</th><th>Reb</th><th>Ast</th>
+          <th>Stl</th><th>Blk</th><th>Tov</th><th>FG</th><th>3P</th><th>FT</th><th>+/-</th>
+        </tr></thead>
+        <tbody>${players.map(playerRow).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+
+  function renderBoxScore(data) {
+    return teamTable(data.away_tri, data.away_players) +
+           teamTable(data.home_tri, data.home_players);
+  }
+
+  /* ── toggle handler (delegated) ── */
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn) return;
+    const gameId = btn.dataset.gameId;
+    const panel  = btn.closest('.boxscore-toggle').nextElementSibling;
+    const isOpen = panel.classList.contains('open');
+
+    btn.classList.toggle('open', !isOpen);
+    panel.classList.toggle('open', !isOpen);
+
+    if (!isOpen && !panel.dataset.loaded) {
+      panel.dataset.loaded = '1';
+      loadBoxScore(gameId, panel);
+    }
+  });
+
+  /* ── card builder ── */
+  function card(g) {
+    const hc = COLORS[g.home_tri] || '#1c1917';
+    const ac = COLORS[g.away_tri] || '#1c1917';
+
+    /* ── center column: pre / live / final ── */
+    let centerHtml;
+    if (g.game_status === 1) {
+      centerHtml = `<span class="vs-text">vs</span><span class="game-time">${g.status}</span>`;
+    } else if (g.game_status === 2) {
+      centerHtml = `<span class="vs-text">vs</span><span class="live-badge">Live</span><span class="game-time">${g.status}</span>`;
+    } else {
+      // Final — show score
+      const homeWon = g.home_score > g.away_score;
+      centerHtml = `<span class="final-badge">Final</span>`;
+    }
+
+    if (g.error && !g.home_prob) {
+      return `<div class="card">
+        <div class="matchup">
+          <div class="team-block"><span class="team-tri" style="color:${hc}">${g.home_tri}</span></div>
+          <div class="matchup-center">${centerHtml}</div>
+          <div class="team-block right"><span class="team-tri" style="color:${ac}">${g.away_tri}</span></div>
+        </div>
+        <div class="card-error">Prediction unavailable &mdash; ${g.error}</div>
+      </div>`;
+    }
+
+    const homeWins  = g.home_prob >= 0.5;
+    const barColor  = homeWins ? hc : ac;
+    const barWidth  = (homeWins ? g.home_prob : g.away_prob) * 100;
+    const barDir    = homeWins ? 'from-left' : 'from-right';
+    const marginAbs = Math.abs(g.margin).toFixed(1);
+    const marginWinner = g.margin >= 0 ? g.home_tri : g.away_tri;
+    const agreeCount = parseInt(g.agreement.split('/')[0]);
+    const pips = [0,1,2].map(i => `<div class="pip ${i < agreeCount ? 'on' : ''}"></div>`).join('');
+    const hB2b = g.home_b2b ? `<div class="b2b-tag">B2B</div>` : '';
+    const aB2b = g.away_b2b ? `<div class="b2b-tag">B2B</div>` : '';
+
+    /* final score blocks */
+    let homeScoreHtml = '', awayScoreHtml = '', resultBadge = '';
+    if (g.game_status >= 2 && (g.home_score > 0 || g.away_score > 0)) {
+      const homeWonGame = g.home_score > g.away_score;
+      homeScoreHtml = `<span class="final-score">
+        <span class="${homeWonGame ? 'winner-score' : 'loser-score'}">${g.home_score}</span>
+      </span>`;
+      awayScoreHtml = `<span class="final-score" style="display:block;text-align:right">
+        <span class="${!homeWonGame ? 'winner-score' : 'loser-score'}">${g.away_score}</span>
+      </span>`;
+
+      if (g.game_status === 3) {
+        const predCorrect = (homeWonGame && g.pred_winner === g.home_tri) ||
+                            (!homeWonGame && g.pred_winner === g.away_tri);
+        resultBadge = `<span class="result-badge ${predCorrect ? 'correct' : 'wrong'}">
+          ${predCorrect ? 'Correct' : 'Wrong'}
+        </span>`;
+      }
+    }
+
+    /* box score toggle — show for live or final */
+    const showBoxScore = g.game_status >= 2;
+    const boxScoreSection = showBoxScore ? `
+      <div class="boxscore-toggle">
+        <button class="toggle-btn" data-game-id="${g.game_id}">
+          Box Score
+          <span class="toggle-icon">&#9660;</span>
+        </button>
+      </div>
+      <div class="boxscore-panel"></div>` : '';
+
+    return `
+    <div class="card">
+      <div class="matchup">
+        <div class="team-block">
+          <span class="team-tri" style="color:${hc}">${g.home_tri}</span>
+          <span class="team-full">${g.home_name}</span>
+          <span class="team-record">${g.home_rec}</span>
+          ${homeScoreHtml}
+          ${hB2b}
+        </div>
+        <div class="matchup-center">
+          ${centerHtml}
+          ${resultBadge}
+        </div>
+        <div class="team-block right">
+          <span class="team-tri" style="color:${ac}">${g.away_tri}</span>
+          <span class="team-full">${g.away_name}</span>
+          <span class="team-record">${g.away_rec}</span>
+          ${awayScoreHtml}
+          ${aB2b}
+        </div>
+      </div>
+
+      <div class="prob-row">
+        <div class="prob-numbers">
+          <span class="prob-num ${homeWins ? 'favored' : ''}">${pct(g.home_prob)}</span>
+          <span class="prob-label-center">predicted win probability</span>
+          <span class="prob-num ${!homeWins ? 'favored' : ''}">${pct(g.away_prob)}</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill ${barDir}" style="width:${barWidth.toFixed(2)}%; background:${barColor}"></div>
+        </div>
+      </div>
+
+      <div class="card-stats">
+        <div class="stat-item">
+          <span class="stat-label">Pick</span>
+          <span class="stat-value pick">${g.pred_winner}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Pred. Margin</span>
+          <span class="stat-value">${marginWinner} &minus;${marginAbs}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Model Consensus <span class="label-hint">(LR · RF · GB agree)</span></span>
+          <div class="pips">${pips}</div>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">LR · RF · GB</span>
+          <span class="stat-value">${pct(g.prob_lr)} &nbsp;·&nbsp; ${pct(g.prob_rf)} &nbsp;·&nbsp; ${pct(g.prob_gb)}</span>
+        </div>
+      </div>
+
+      ${boxScoreSection}
+    </div>`;
+  }
+
+  /* ── main load ── */
+  async function load() {
+    try {
+      const res  = await fetch('/api/predictions');
+      const data = await res.json();
+      const el   = document.getElementById('content');
+      const lbl  = document.getElementById('games-label');
+
+      if (data.updated)
+        document.getElementById('updated-time').textContent = 'Updated ' + data.updated;
+
+      if (data.error) { el.innerHTML = `<div class="state"><p>${data.error}</p></div>`; return; }
+
+      if (!data.games || data.games.length === 0) {
+        lbl.textContent = 'No Games Today';
+        el.innerHTML = `<div class="state"><p>No NBA games scheduled today.</p></div>`;
+        return;
+      }
+
+      lbl.textContent = data.games.length === 1 ? '1 Game Today' : `${data.games.length} Games Today`;
+      el.innerHTML = `<div class="games">${data.games.map(card).join('')}</div>`;
+
+    } catch(e) {
+      document.getElementById('content').innerHTML = `<div class="state"><p>Could not load predictions.</p></div>`;
+    }
+  }
+
+  load();
+  setInterval(load, 5 * 60 * 1000);
+</script>
+</body>
+</html>
