@@ -2,6 +2,7 @@
 app.py — Flask web server for NBA predictions
 """
 
+import os
 import time
 import json
 import warnings
@@ -24,8 +25,12 @@ CORS(app)
 
 MODELS_DIR   = Path("models")
 RAW          = Path("data/raw")
-HISTORY_FILE = Path("data/history.json")
 SLEEP        = 0.6
+
+GIST_ID      = os.environ.get("GIST_ID", "")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GIST_FILE    = "history.json"
+GIST_HEADERS = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
 
 FEATURE_COLS = [
     "DIFF_OFF_RATING", "DIFF_DEF_RATING", "DIFF_NET_RATING", "DIFF_PACE",
@@ -221,24 +226,34 @@ def build_comparison(home_tri, away_tri, home_id, away_id,
         "rows":           rows,
     }
 
-# ── history helpers ──────────────────────────────────────────────────────────
+# ── history helpers (GitHub Gist) ────────────────────────────────────────────
 
 def load_history():
-    if not HISTORY_FILE.exists():
+    if not GIST_ID:
         return {}
-    with open(HISTORY_FILE) as f:
-        return json.load(f)
+    try:
+        r = requests.get(f"https://api.github.com/gists/{GIST_ID}", headers=GIST_HEADERS, timeout=10)
+        raw_url = r.json()["files"][GIST_FILE]["raw_url"]
+        return requests.get(raw_url, timeout=10).json()
+    except Exception as e:
+        print(f"[gist] load error: {e}")
+        return {}
 
 def save_results(date_str, games):
-    """Save final games for a given date to history.json."""
     final_games = [g for g in games if g.get("game_status") == 3 and "pred_winner" in g]
-    if not final_games:
+    if not final_games or not GIST_ID:
         return
     history = load_history()
     history[date_str] = final_games
-    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f)
+    try:
+        requests.patch(
+            f"https://api.github.com/gists/{GIST_ID}",
+            headers=GIST_HEADERS,
+            json={"files": {GIST_FILE: {"content": json.dumps(history)}}},
+            timeout=10
+        )
+    except Exception as e:
+        print(f"[gist] save error: {e}")
 
 def scheduled_save():
     """Background job: fetch today's final games and save to history."""
