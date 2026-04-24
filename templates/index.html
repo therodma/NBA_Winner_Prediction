@@ -297,6 +297,25 @@
     .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
     .pip.on { background: var(--green); }
 
+    .chart-wrap {
+      padding: 0 32px 16px;
+      background: var(--bg-card);
+    }
+    .chart-label {
+      font-size: 0.58rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 6px;
+    }
+    canvas.sparkline {
+      width: 100%;
+      height: 56px;
+      display: none;
+      border-radius: 2px;
+    }
+
     /* ── box score toggle ── */
     .boxscore-toggle {
       border-top: 1px solid var(--border-light);
@@ -427,11 +446,11 @@
 
 <header>
   <div class="header-eyebrow">Machine Learning · {{ today }}</div>
-  <h1>NBA <em>Game Predictions</em></h1>
+  <h1>NBA Game Predictions</h1>
   <div class="header-sub">
     <span id="updated-time">Loading&hellip;</span>
     <span class="sep">|</span>
-    <span>71% accuracy &middot; 2024&ndash;25 season</span>
+    <span>71% accuracy &middot; 2025&ndash;26 season</span>
     <span class="sep">|</span>
     <span>Refreshes every 5 min</span>
   </div>
@@ -443,6 +462,14 @@
     <div class="state">
       <div class="spinner"></div>
       <p>Fetching today's games&hellip;</p>
+    </div>
+  </div>
+
+  <div class="section-label" style="margin-top: 48px" id="yesterday-label">Yesterday's Results</div>
+  <div id="yesterday-content">
+    <div class="state" style="padding: 40px 20px">
+      <div class="spinner"></div>
+      <p>Loading&hellip;</p>
     </div>
   </div>
 </main>
@@ -657,6 +684,11 @@
         </div>
       </div>
 
+      ${g.game_status === 2 ? `<div class="chart-wrap">
+        <div class="chart-label">${g.home_tri} win probability trend</div>
+        <canvas id="chart-${g.game_id}" class="sparkline" width="756" height="56"></canvas>
+      </div>` : ''}
+
       ${boxScoreSection}
     </div>`;
   }
@@ -682,14 +714,166 @@
 
       lbl.textContent = data.games.length === 1 ? '1 Game Today' : `${data.games.length} Games Today`;
       el.innerHTML = `<div class="games">${data.games.map(card).join('')}</div>`;
+      updateCharts(data.games);
 
     } catch(e) {
       document.getElementById('content').innerHTML = `<div class="state"><p>Could not load predictions.</p></div>`;
     }
   }
+  /* ── yesterday card ── */
+  function yesterdayCard(g) {
+    const hc = COLORS[g.home_tri] || '#1c1917';
+    const ac = COLORS[g.away_tri] || '#1c1917';
+    const homeWonGame = g.home_score > g.away_score;
+    const predCorrect = (homeWonGame && g.pred_winner === g.home_tri) ||
+                        (!homeWonGame && g.pred_winner === g.away_tri);
+    const resultBadge = `<span class="result-badge ${predCorrect ? 'correct' : 'wrong'}">${predCorrect ? '✓ Correct' : '✗ Wrong'}</span>`;
+    const marginAbs = Math.abs(g.margin).toFixed(1);
+    const marginWinner = g.margin >= 0 ? g.home_tri : g.away_tri;
+    const homeWins = g.home_prob >= 0.5;
+    const barColor = homeWins ? hc : ac;
+    const barWidth = (homeWins ? g.home_prob : g.away_prob) * 100;
+    const barDir   = homeWins ? 'from-left' : 'from-right';
+    return `
+    <div class="card">
+      <div class="matchup">
+        <div class="team-block">
+          <span class="team-tri" style="color:${hc}">${g.home_tri}</span>
+          <span class="team-full">${g.home_name}</span>
+          <span class="team-record">${g.home_rec}</span>
+          <span class="final-score"><span class="${homeWonGame ? 'winner-score' : 'loser-score'}">${g.home_score}</span></span>
+        </div>
+        <div class="matchup-center">
+          <span class="final-badge">Final</span>
+          ${resultBadge}
+        </div>
+        <div class="team-block right">
+          <span class="team-tri" style="color:${ac}">${g.away_tri}</span>
+          <span class="team-full">${g.away_name}</span>
+          <span class="team-record">${g.away_rec}</span>
+          <span class="final-score" style="display:block;text-align:right"><span class="${!homeWonGame ? 'winner-score' : 'loser-score'}">${g.away_score}</span></span>
+        </div>
+      </div>
+      <div class="prob-row">
+        <div class="prob-numbers">
+          <span class="prob-num ${homeWins ? 'favored' : ''}">${pct(g.home_prob)}</span>
+          <span class="prob-label-center">predicted win probability</span>
+          <span class="prob-num ${!homeWins ? 'favored' : ''}">${pct(g.away_prob)}</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill ${barDir}" style="width:${barWidth.toFixed(2)}%; background:${barColor}"></div>
+        </div>
+      </div>
+      <div class="card-stats">
+        <div class="stat-item">
+          <span class="stat-label">Pick</span>
+          <span class="stat-value pick">${g.pred_winner}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Pred. Margin</span>
+          <span class="stat-value">${marginWinner} &minus;${marginAbs}</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">LR &middot; RF &middot; GB</span>
+          <span class="stat-value">${pct(g.prob_lr)} &nbsp;&middot;&nbsp; ${pct(g.prob_rf)} &nbsp;&middot;&nbsp; ${pct(g.prob_gb)}</span>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  async function loadYesterday() {
+    try {
+      const res  = await fetch('/api/yesterday');
+      const data = await res.json();
+      const el   = document.getElementById('yesterday-content');
+      const lbl  = document.getElementById('yesterday-label');
+      const d    = new Date(data.date + 'T12:00:00');
+      const label = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      if (!data.games || data.games.length === 0) {
+        lbl.textContent = `${label} Results`;
+        el.innerHTML = `<div class="state" style="padding:40px 20px"><p>No saved results yet — check back after today's games finish.</p></div>`;
+        return;
+      }
+      const correct = data.games.filter(g => {
+        const homeWon = g.home_score > g.away_score;
+        return (homeWon && g.pred_winner === g.home_tri) || (!homeWon && g.pred_winner === g.away_tri);
+      }).length;
+      lbl.textContent = `${label} Results — ${correct}/${data.games.length} correct`;
+      el.innerHTML = `<div class="games">${data.games.map(yesterdayCard).join('')}</div>`;
+    } catch(e) {
+      document.getElementById('yesterday-content').innerHTML =
+        `<div class="state" style="padding:40px 20px"><p>Could not load yesterday's results.</p></div>`;
+    }
+  }
+
+  /* ── sparkline chart ── */
+  function drawSparkline(canvas, history, homeColor, awayColor) {
+    if (!history || history.length < 2) {
+      canvas.style.display = 'none';
+      return;
+    }
+    canvas.style.display = 'block';
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // midline
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    const probs = history.map(h => h.home_prob);
+    const xStep = W / (probs.length - 1);
+
+    // fill
+    ctx.beginPath();
+    probs.forEach((p, i) => {
+      const x = i * xStep, y = H - p * H;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.lineTo((probs.length - 1) * xStep, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, homeColor + '55');
+    grad.addColorStop(1, homeColor + '00');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // line
+    ctx.beginPath();
+    probs.forEach((p, i) => {
+      const x = i * xStep, y = H - p * H;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = homeColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // last dot
+    const lx = (probs.length - 1) * xStep, ly = H - probs[probs.length-1] * H;
+    ctx.beginPath();
+    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
+    ctx.fillStyle = homeColor;
+    ctx.fill();
+  }
+
+  function updateCharts(games) {
+    games.forEach(g => {
+      if (!g.prob_history || g.prob_history.length < 2) return;
+      const canvas = document.getElementById('chart-' + g.game_id);
+      if (!canvas) return;
+      const hc = COLORS[g.home_tri] || '#1c1917';
+      const ac = COLORS[g.away_tri] || '#1c1917';
+      drawSparkline(canvas, g.prob_history, hc, ac);
+    });
+  }
 
   load();
-  setInterval(load, 5 * 60 * 1000);
+  loadYesterday();
+  setInterval(load, 60 * 1000);
 </script>
 </body>
 </html>

@@ -6,6 +6,8 @@ import os
 import time
 import json
 import warnings
+import threading
+import requests
 import numpy as np
 import pandas as pd
 import joblib
@@ -25,7 +27,7 @@ CORS(app)
 
 MODELS_DIR   = Path("models")
 RAW          = Path("data/raw")
-SLEEP        = 0.6
+SLEEP        = 0.3
 
 GIST_ID      = os.environ.get("GIST_ID", "")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
@@ -57,6 +59,14 @@ LOGS         = pd.read_csv(RAW / "game_logs.csv",  parse_dates=["GAME_DATE"])
 MATCHUPS     = pd.read_csv(RAW / "matchups.csv",   parse_dates=["GAME_DATE"])
 STATS        = pd.read_csv(RAW / "team_stats.csv")
 print("Ready.")
+
+# ── in-memory cache ───────────────────────────────────────────────────────────
+
+_cache = {"data": None, "updated": None}
+_cache_lock = threading.Lock()
+
+# prob history: {game_id: [{time, home_prob}]}
+_prob_history = {}
 
 # ── feature helpers ───────────────────────────────────────────────────────────
 
@@ -122,7 +132,6 @@ def build_features(home_id, away_id):
 # ── box score helpers ─────────────────────────────────────────────────────────
 
 def parse_minutes(raw):
-    """Convert PT24M41.00S -> '24:41'"""
     m = raw.replace("PT", "").replace("M", ":").split(":")[0:2]
     return ":".join(m) if len(m) == 2 else raw
 
@@ -151,7 +160,6 @@ def parse_players(team_data):
     return players
 
 def parse_team_stats(team_data):
-    """Extract actual team-level stats from box score for comparison."""
     s = team_data["statistics"]
     return {
         "pts":     s["points"],
@@ -168,65 +176,7 @@ def parse_team_stats(team_data):
         "biggest_lead": s["biggestLead"],
     }
 
-def build_comparison(home_tri, away_tri, home_id, away_id,
-                     actual_home, actual_away,
-                     pred_margin, pred_winner,
-                     actual_home_score, actual_away_score):
-    """
-    Build predicted vs actual comparison for a final game.
-    'Predicted' team stats come from season averages (what the model expected).
-    'Actual' stats come from the box score.
-    """
-    hs = get_stats(home_id)
-    as_ = get_stats(away_id)
-
-    actual_margin  = actual_home_score - actual_away_score
-    actual_winner  = home_tri if actual_margin > 0 else away_tri
-    winner_correct = pred_winner == actual_winner
-    margin_error   = round(abs(pred_margin - actual_margin), 1)
-
-    def stat_row(label, pred_home, pred_away, act_home, act_away, fmt="{:.1f}", pct=False):
-        suffix = "%" if pct else ""
-        return {
-            "label":      label,
-            "pred_home":  fmt.format(pred_home) + suffix,
-            "pred_away":  fmt.format(pred_away) + suffix,
-            "act_home":   fmt.format(act_home)  + suffix,
-            "act_away":   fmt.format(act_away)  + suffix,
-            "home_delta": round(act_home - pred_home, 1),
-            "away_delta": round(act_away - pred_away, 1),
-        }
-
-    rows = [
-        stat_row("Points",   float(hs["PTS"]),     float(as_["PTS"]),
-                              actual_home["pts"],   actual_away["pts"],    fmt="{:.0f}"),
-        stat_row("Rebounds",  float(hs["REB"]),     float(as_["REB"]),
-                              actual_home["reb"],   actual_away["reb"],    fmt="{:.0f}"),
-        stat_row("Assists",   float(hs["AST"]),     float(as_["AST"]),
-                              actual_home["ast"],   actual_away["ast"],    fmt="{:.0f}"),
-        stat_row("Turnovers", float(hs["TOV"]),     float(as_["TOV"]),
-                              actual_home["tov"],   actual_away["tov"],    fmt="{:.0f}"),
-        stat_row("FG%",       float(hs["FG_PCT"])*100,  float(as_["FG_PCT"])*100,
-                              actual_home["fg_pct"], actual_away["fg_pct"], fmt="{:.1f}", pct=True),
-        stat_row("3P%",       float(hs["FG3_PCT"])*100, float(as_["FG3_PCT"])*100,
-                              actual_home["3p_pct"], actual_away["3p_pct"], fmt="{:.1f}", pct=True),
-        stat_row("FT%",       float(hs["FT_PCT"])*100,  float(as_["FT_PCT"])*100,
-                              actual_home["ft_pct"], actual_away["ft_pct"], fmt="{:.1f}", pct=True),
-    ]
-
-    return {
-        "pred_winner":    pred_winner,
-        "actual_winner":  actual_winner,
-        "winner_correct": winner_correct,
-        "pred_margin":    round(pred_margin, 1),
-        "actual_margin":  actual_margin,
-        "margin_error":   margin_error,
-        "home_tri":       home_tri,
-        "away_tri":       away_tri,
-        "rows":           rows,
-    }
-
-# ── history helpers (GitHub Gist) ────────────────────────────────────────────
+# ── history helpers (GitHub Gist) ─────────────────────────────────────────────
 
 def load_history():
     if not GIST_ID:
@@ -255,27 +205,27 @@ def save_results(date_str, games):
     except Exception as e:
         print(f"[gist] save error: {e}")
 
-def scheduled_save():
-    """Background job: fetch today's final games and save to history."""
-    try:
-        time.sleep(SLEEP)
-        sb    = live_scoreboard.ScoreBoard()
-        games = sb.get_dict()["scoreboard"]["games"]
-    except Exception as e:
-        print(f"[scheduler] scoreboard error: {e}")
-        return
+# ── core prediction fetch (used by cache + scheduler) ─────────────────────────
 
+def fetch_predictions():
+    time.sleep(SLEEP)
+    sb    = live_scoreboard.ScoreBoard()
+    games = sb.get_dict()["scoreboard"]["games"]
     results = []
     for g in games:
         home_id   = g["homeTeam"]["teamId"]
         away_id   = g["awayTeam"]["teamId"]
         home_tri  = g["homeTeam"]["teamTricode"]
         away_tri  = g["awayTeam"]["teamTricode"]
+        home_name = g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"]
+        away_name = g["awayTeam"]["teamCity"] + " " + g["awayTeam"]["teamName"]
+        home_rec  = f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}"
+        away_rec  = f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}"
+        status      = g["gameStatusText"]
         game_status = g["gameStatus"]
         home_score  = g["homeTeam"]["score"]
         away_score  = g["awayTeam"]["score"]
-        if game_status != 3:
-            continue
+        game_id     = g["gameId"]
         try:
             feats = build_features(home_id, away_id)
             X = pd.DataFrame([feats], columns=FEATURE_COLS).values
@@ -292,14 +242,22 @@ def scheduled_save():
                 preds[m] == preds["Ensemble"]
                 for m in ["LogisticRegression", "RandomForest", "GradientBoosting"]
             )
+            # track prob history for live games
+            if game_status == 2:
+                ts = datetime.now(timezone.utc).strftime("%H:%M")
+                if game_id not in _prob_history:
+                    _prob_history[game_id] = []
+                hist = _prob_history[game_id]
+                if not hist or hist[-1]["home_prob"] != home_prob:
+                    hist.append({"t": ts, "home_prob": home_prob})
+                    if len(hist) > 50:
+                        hist.pop(0)
             results.append({
                 "home_tri": home_tri, "away_tri": away_tri,
-                "home_name": g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"],
-                "away_name": g["awayTeam"]["teamCity"] + " " + g["awayTeam"]["teamName"],
-                "home_rec": f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}",
-                "away_rec": f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}",
-                "status": g["gameStatusText"], "game_status": game_status,
-                "game_id": g["gameId"],
+                "home_name": home_name, "away_name": away_name,
+                "home_rec": home_rec, "away_rec": away_rec,
+                "status": status, "game_status": game_status,
+                "game_id": game_id,
                 "home_id": home_id, "away_id": away_id,
                 "home_score": home_score, "away_score": away_score,
                 "home_prob": home_prob, "away_prob": away_prob,
@@ -311,20 +269,41 @@ def scheduled_save():
                 "prob_gb": probs["GradientBoosting"],
                 "home_b2b": bool(feats["HOME_B2B"]),
                 "away_b2b": bool(feats["AWAY_B2B"]),
+                "prob_history": _prob_history.get(game_id, []),
             })
         except Exception as e:
-            print(f"[scheduler] prediction error for {home_tri} vs {away_tri}: {e}")
+            results.append({
+                "home_tri": home_tri, "away_tri": away_tri,
+                "home_name": home_name, "away_name": away_name,
+                "home_rec": home_rec, "away_rec": away_rec,
+                "status": status, "game_status": game_status,
+                "game_id": game_id,
+                "home_id": home_id, "away_id": away_id,
+                "home_score": home_score, "away_score": away_score,
+                "error": str(e),
+            })
+    return results
 
-    if results:
+def refresh_cache():
+    try:
+        results = fetch_predictions()
+        updated = datetime.now(timezone.utc).strftime("%I:%M %p UTC")
+        with _cache_lock:
+            _cache["data"] = results
+            _cache["updated"] = updated
         save_results(date.today().isoformat(), results)
-        print(f"[scheduler] saved {len(results)} final games for {date.today().isoformat()}")
+        print(f"[cache] refreshed at {updated}")
+    except Exception as e:
+        print(f"[cache] refresh error: {e}")
+
+def scheduled_save():
+    refresh_cache()
 
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
     return render_template("index.html", today=date.today().strftime("%B %d, %Y"))
-
 
 @app.route("/api/boxscore/<game_id>")
 def get_boxscore(game_id):
@@ -334,13 +313,11 @@ def get_boxscore(game_id):
         data      = bs.get_dict()["game"]
         home_data = data["homeTeam"]
         away_data = data["awayTeam"]
-
         def parse_periods(team_data):
             return [
                 {"period": p["period"], "type": p["periodType"], "score": p["score"]}
                 for p in team_data["periods"]
             ]
-
         return jsonify({
             "home_tri":     home_data["teamTricode"],
             "away_tri":     away_data["teamTricode"],
@@ -354,120 +331,25 @@ def get_boxscore(game_id):
     except Exception as e:
         return jsonify({"error": str(e)})
 
-
-@app.route("/api/comparison/<game_id>/<int:home_id>/<int:away_id>/<int:home_score>/<int:away_score>/<pred_winner>/<float:pred_margin>")
-def get_comparison(game_id, home_id, away_id, home_score, away_score, pred_winner, pred_margin):
-    try:
-        time.sleep(SLEEP)
-        bs        = live_boxscore.BoxScore(game_id)
-        data      = bs.get_dict()["game"]
-        home_data = data["homeTeam"]
-        away_data = data["awayTeam"]
-
-        actual_home = parse_team_stats(home_data)
-        actual_away = parse_team_stats(away_data)
-
-        comparison = build_comparison(
-            home_tri=home_data["teamTricode"],
-            away_tri=away_data["teamTricode"],
-            home_id=home_id,
-            away_id=away_id,
-            actual_home=actual_home,
-            actual_away=actual_away,
-            pred_margin=pred_margin,
-            pred_winner=pred_winner,
-            actual_home_score=home_score,
-            actual_away_score=away_score,
-        )
-        return jsonify(comparison)
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-
 @app.route("/api/predictions")
 def predictions():
-    try:
-        time.sleep(SLEEP)
-        sb    = live_scoreboard.ScoreBoard()
-        games = sb.get_dict()["scoreboard"]["games"]
-    except Exception as e:
-        return jsonify({"error": str(e), "games": []})
-
-    if not games:
-        return jsonify({"games": [], "date": date.today().isoformat()})
-
-    results = []
-    for g in games:
-        home_id   = g["homeTeam"]["teamId"]
-        away_id   = g["awayTeam"]["teamId"]
-        home_tri  = g["homeTeam"]["teamTricode"]
-        away_tri  = g["awayTeam"]["teamTricode"]
-        home_name = g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"]
-        away_name = g["awayTeam"]["teamCity"] + " " + g["awayTeam"]["teamName"]
-        home_rec  = f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}"
-        away_rec  = f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}"
-        status      = g["gameStatusText"]
-        game_status = g["gameStatus"]  # 1=pre, 2=live, 3=final
-        home_score  = g["homeTeam"]["score"]
-        away_score  = g["awayTeam"]["score"]
-
+    with _cache_lock:
+        data    = _cache["data"]
+        updated = _cache["updated"]
+    if data is None:
         try:
-            feats = build_features(home_id, away_id)
-            X = pd.DataFrame([feats], columns=FEATURE_COLS).values
-
-            probs, preds = {}, {}
-            for name, model in MODELS.items():
-                p = model.predict_proba(X)[0, 1]
-                probs[name] = round(float(p), 3)
-                preds[name] = int(p >= 0.5)
-
-            margin      = float(MARGIN_MODEL.predict(X)[0])
-            home_prob   = probs["Ensemble"]
-            away_prob   = round(1 - home_prob, 3)
-            pred_winner = home_tri if home_prob >= 0.5 else away_tri
-            agreement   = sum(
-                preds[m] == preds["Ensemble"]
-                for m in ["LogisticRegression", "RandomForest", "GradientBoosting"]
-            )
-
-            results.append({
-                "home_tri": home_tri, "away_tri": away_tri,
-                "home_name": home_name, "away_name": away_name,
-                "home_rec": home_rec, "away_rec": away_rec,
-                "status": status, "game_status": game_status,
-                "game_id": g["gameId"],
-                "home_id": home_id, "away_id": away_id,
-                "home_score": home_score, "away_score": away_score,
-                "home_prob": home_prob, "away_prob": away_prob,
-                "pred_winner": pred_winner,
-                "margin": round(margin, 1),
-                "agreement": f"{agreement}/3",
-                "prob_lr": probs["LogisticRegression"],
-                "prob_rf": probs["RandomForest"],
-                "prob_gb": probs["GradientBoosting"],
-                "home_b2b": bool(feats["HOME_B2B"]),
-                "away_b2b": bool(feats["AWAY_B2B"]),
-            })
+            data = fetch_predictions()
+            updated = datetime.now(timezone.utc).strftime("%I:%M %p UTC")
+            with _cache_lock:
+                _cache["data"] = data
+                _cache["updated"] = updated
         except Exception as e:
-            results.append({
-                "home_tri": home_tri, "away_tri": away_tri,
-                "home_name": home_name, "away_name": away_name,
-                "home_rec": home_rec, "away_rec": away_rec,
-                "status": status, "game_status": game_status,
-                "game_id": g["gameId"],
-                "home_id": home_id, "away_id": away_id,
-                "home_score": home_score, "away_score": away_score,
-                "error": str(e),
-            })
-
-    save_results(date.today().isoformat(), results)
-
+            return jsonify({"error": str(e), "games": []})
     return jsonify({
-        "games": results,
-        "date": date.today().isoformat(),
-        "updated": datetime.now(timezone.utc).strftime("%I:%M %p UTC"),
+        "games":   data,
+        "date":    date.today().isoformat(),
+        "updated": updated,
     })
-
 
 @app.route("/api/yesterday")
 def yesterday():
@@ -476,21 +358,19 @@ def yesterday():
     games = history.get(yesterday_str, [])
     return jsonify({"games": games, "date": yesterday_str})
 
-
 if __name__ == "__main__":
-    import threading, webbrowser
+    import webbrowser
 
     scheduler = BackgroundScheduler()
+    scheduler.add_job(refresh_cache, "interval", seconds=60)
     scheduler.add_job(scheduled_save, "cron", hour=0, minute=5)
     scheduler.add_job(
-        lambda: __import__('requests').get("https://nba-winner-prediction.onrender.com/", timeout=10),
+        lambda: requests.get("https://nba-winner-prediction.onrender.com/", timeout=10),
         "interval", minutes=10
     )
     scheduler.start()
-    print("Scheduler started — saving results nightly at 12:05 AM, pinging every 10 min.")
+    print("Scheduler started — refreshing every 60s, saving nightly at 12:05 AM.")
 
-    def open_browser():
-        webbrowser.open("http://localhost:5000")
-    threading.Timer(1.2, open_browser).start()
+    threading.Timer(1.2, lambda: webbrowser.open("http://localhost:5000")).start()
     print("NBA Predictions running at http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=False)

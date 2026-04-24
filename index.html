@@ -71,6 +71,9 @@
     .pips{display:flex;gap:4px;align-items:center;margin-top:2px}
     .pip{width:7px;height:7px;border-radius:50%;background:var(--border)}
     .pip.on{background:var(--green)}
+    .chart-wrap{padding:0 32px 16px;background:var(--bg-card)}
+    .chart-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+    canvas.sparkline{width:100%;height:56px;display:none;border-radius:2px}
     .boxscore-toggle{border-top:1px solid var(--border-light);background:var(--bg);padding:0}
     .toggle-btn{width:100%;background:none;border:none;cursor:pointer;padding:11px 32px;display:flex;align-items:center;justify-content:space-between;font-family:'Inter',sans-serif;font-size:.62rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);transition:color .15s}
     .toggle-btn:hover{color:var(--ink-2)}
@@ -97,17 +100,15 @@
     footer p{font-size:.68rem;color:var(--ink-3);line-height:1.7}
     footer strong{font-weight:500;color:var(--ink-2)}
     @media(max-width:600px){
-      header{padding:36px 20px 28px}
-      header h1{font-size:1.8rem}
+      header{padding:36px 20px 28px}header h1{font-size:1.8rem}
       main{padding:32px 16px 48px}
       .matchup{padding:20px 16px 16px;grid-template-columns:1fr 100px 1fr}
-      .team-tri{font-size:1.5rem}
-      .team-full{display:none}
+      .team-tri{font-size:1.5rem}.team-full{display:none}
       .prob-row{padding:0 16px 18px}
       .card-stats{padding:12px 16px;flex-wrap:wrap;gap:12px}
       .stat-item{flex:none;width:calc(50% - 6px);border-right:none!important;margin-right:0!important;padding-right:0}
-      .bs-team-section{padding:16px}
-      .toggle-btn{padding:11px 16px}
+      .bs-team-section{padding:16px}.toggle-btn{padding:11px 16px}
+      .chart-wrap{padding:0 16px 16px}
     }
   </style>
 </head>
@@ -120,7 +121,7 @@
     <span class="sep">|</span>
     <span>71% accuracy &middot; 2025&ndash;26 season</span>
     <span class="sep">|</span>
-    <span>Refreshes every 5 min</span>
+    <span>Refreshes every 60s</span>
   </div>
 </header>
 <main>
@@ -148,6 +149,40 @@
   document.getElementById('today-date').textContent =
     new Date().toLocaleDateString('en-US', {month:'long',day:'numeric',year:'numeric'});
 
+  /* ── sparkline ── */
+  function drawSparkline(canvas, history, homeColor) {
+    if (!history || history.length < 2) { canvas.style.display='none'; return; }
+    canvas.style.display = 'block';
+    const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle='rgba(0,0,0,0.06)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
+    ctx.setLineDash([]);
+    const probs = history.map(h => h.home_prob);
+    const xStep = W / (probs.length - 1);
+    ctx.beginPath();
+    probs.forEach((p,i) => { const x=i*xStep,y=H-p*H; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.lineTo((probs.length-1)*xStep,H); ctx.lineTo(0,H); ctx.closePath();
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,homeColor+'55'); grad.addColorStop(1,homeColor+'00');
+    ctx.fillStyle=grad; ctx.fill();
+    ctx.beginPath();
+    probs.forEach((p,i) => { const x=i*xStep,y=H-p*H; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.strokeStyle=homeColor; ctx.lineWidth=2; ctx.stroke();
+    const lx=(probs.length-1)*xStep, ly=H-probs[probs.length-1]*H;
+    ctx.beginPath(); ctx.arc(lx,ly,3,0,Math.PI*2); ctx.fillStyle=homeColor; ctx.fill();
+  }
+
+  function updateCharts(games) {
+    games.forEach(g => {
+      if (!g.prob_history || g.prob_history.length < 2) return;
+      const canvas = document.getElementById('chart-' + g.game_id);
+      if (!canvas) return;
+      drawSparkline(canvas, g.prob_history, COLORS[g.home_tri] || '#1c1917');
+    });
+  }
+
+  /* ── box score ── */
   async function loadBoxScore(gameId, panelEl) {
     panelEl.innerHTML = '<div class="bs-loading">Loading box score&hellip;</div>';
     try {
@@ -162,7 +197,7 @@
         </tr></thead><tbody>${players.map(p => {
           const pmClass = p.pm > 0 ? 'bs-pm-pos' : p.pm < 0 ? 'bs-pm-neg' : '';
           const pmStr = p.pm > 0 ? `+${p.pm}` : `${p.pm}`;
-          return `<tr class="${p.starter ? 'starter' : ''}">
+          return `<tr class="${p.starter?'starter':''}">
             <td>${p.name}</td><td>${p.min}</td><td class="bs-pts">${p.pts}</td>
             <td>${p.reb}</td><td>${p.ast}</td><td>${p.stl}</td><td>${p.blk}</td>
             <td>${p.tov}</td><td>${p.fg}</td><td>${p['3p']}</td><td>${p.ft}</td>
@@ -179,9 +214,10 @@
     const isOpen = panel.classList.contains('open');
     btn.classList.toggle('open', !isOpen);
     panel.classList.toggle('open', !isOpen);
-    if (!isOpen && !panel.dataset.loaded) { panel.dataset.loaded = '1'; loadBoxScore(btn.dataset.gameId, panel); }
+    if (!isOpen && !panel.dataset.loaded) { panel.dataset.loaded='1'; loadBoxScore(btn.dataset.gameId, panel); }
   });
 
+  /* ── card builder ── */
   function buildCard(g, showBoxScore) {
     const hc = COLORS[g.home_tri] || '#1c1917';
     const ac = COLORS[g.away_tri] || '#1c1917';
@@ -192,7 +228,7 @@
     const marginAbs = Math.abs(g.margin).toFixed(1);
     const marginWinner = g.margin >= 0 ? g.home_tri : g.away_tri;
 
-    let centerHtml, homeScoreHtml = '', awayScoreHtml = '', resultBadge = '';
+    let centerHtml, homeScoreHtml='', awayScoreHtml='', resultBadge='';
     if (g.game_status === 1) {
       centerHtml = `<span class="vs-text">vs</span><span class="game-time">${g.status}</span>`;
     } else if (g.game_status === 2) {
@@ -201,18 +237,23 @@
       centerHtml = `<span class="final-badge">Final</span>`;
     }
     if (g.game_status >= 2 && (g.home_score > 0 || g.away_score > 0)) {
-      const homeWonGame = g.home_score > g.away_score;
-      homeScoreHtml = `<span class="final-score"><span class="${homeWonGame ? 'winner-score' : 'loser-score'}">${g.home_score}</span></span>`;
-      awayScoreHtml = `<span class="final-score" style="display:block;text-align:right"><span class="${!homeWonGame ? 'winner-score' : 'loser-score'}">${g.away_score}</span></span>`;
+      const hw = g.home_score > g.away_score;
+      homeScoreHtml = `<span class="final-score"><span class="${hw?'winner-score':'loser-score'}">${g.home_score}</span></span>`;
+      awayScoreHtml = `<span class="final-score" style="display:block;text-align:right"><span class="${!hw?'winner-score':'loser-score'}">${g.away_score}</span></span>`;
       if (g.game_status === 3) {
-        const ok = (homeWonGame && g.pred_winner === g.home_tri) || (!homeWonGame && g.pred_winner === g.away_tri);
-        resultBadge = `<span class="result-badge ${ok ? 'correct' : 'wrong'}">${ok ? 'Correct' : 'Wrong'}</span>`;
+        const ok = (hw && g.pred_winner===g.home_tri)||(!hw && g.pred_winner===g.away_tri);
+        resultBadge = `<span class="result-badge ${ok?'correct':'wrong'}">${ok?'Correct':'Wrong'}</span>`;
       }
     }
-    const agreeCount = parseInt((g.agreement || '0/3').split('/')[0]);
-    const pips = [0,1,2].map(i => `<div class="pip ${i < agreeCount ? 'on' : ''}"></div>`).join('');
+    const agreeCount = parseInt((g.agreement||'0/3').split('/')[0]);
+    const pips = [0,1,2].map(i=>`<div class="pip ${i<agreeCount?'on':''}"></div>`).join('');
     const hB2b = g.home_b2b ? `<div class="b2b-tag">B2B</div>` : '';
     const aB2b = g.away_b2b ? `<div class="b2b-tag">B2B</div>` : '';
+    const chartSection = g.game_status === 2 ? `
+      <div class="chart-wrap">
+        <div class="chart-label">${g.home_tri} win probability trend</div>
+        <canvas id="chart-${g.game_id}" class="sparkline" width="756" height="56"></canvas>
+      </div>` : '';
     const bsSection = showBoxScore ? `
       <div class="boxscore-toggle">
         <button class="toggle-btn" data-game-id="${g.game_id}">Box Score <span class="toggle-icon">&#9660;</span></button>
@@ -236,22 +277,24 @@
       </div>
       <div class="prob-row">
         <div class="prob-numbers">
-          <span class="prob-num ${homeWins ? 'favored' : ''}">${pct(g.home_prob)}</span>
+          <span class="prob-num ${homeWins?'favored':''}">${pct(g.home_prob)}</span>
           <span class="prob-label-center">predicted win probability</span>
-          <span class="prob-num ${!homeWins ? 'favored' : ''}">${pct(g.away_prob)}</span>
+          <span class="prob-num ${!homeWins?'favored':''}">${pct(g.away_prob)}</span>
         </div>
         <div class="bar-track"><div class="bar-fill ${barDir}" style="width:${barWidth.toFixed(2)}%;background:${barColor}"></div></div>
       </div>
       <div class="card-stats">
         <div class="stat-item"><span class="stat-label">Pick</span><span class="stat-value pick">${g.pred_winner}</span></div>
         <div class="stat-item"><span class="stat-label">Pred. Margin</span><span class="stat-value">${marginWinner} &minus;${marginAbs}</span></div>
-        <div class="stat-item"><span class="stat-label">Model Consensus <span class="label-hint">(LR · RF · GB)</span></span><div class="pips">${pips}</div></div>
-        <div class="stat-item"><span class="stat-label">LR · RF · GB</span><span class="stat-value">${pct(g.prob_lr)} &nbsp;·&nbsp; ${pct(g.prob_rf)} &nbsp;·&nbsp; ${pct(g.prob_gb)}</span></div>
+        <div class="stat-item"><span class="stat-label">Model Consensus <span class="label-hint">(LR &middot; RF &middot; GB)</span></span><div class="pips">${pips}</div></div>
+        <div class="stat-item"><span class="stat-label">LR &middot; RF &middot; GB</span><span class="stat-value">${pct(g.prob_lr)} &nbsp;&middot;&nbsp; ${pct(g.prob_rf)} &nbsp;&middot;&nbsp; ${pct(g.prob_gb)}</span></div>
       </div>
+      ${chartSection}
       ${bsSection}
     </div>`;
   }
 
+  /* ── load today ── */
   async function load() {
     try {
       const data = await fetch(`${API}/api/predictions`).then(r => r.json());
@@ -265,11 +308,13 @@
       }
       lbl.textContent = `${data.games.length} Game${data.games.length > 1 ? 's' : ''} Today`;
       el.innerHTML = `<div class="games">${data.games.map(g => buildCard(g, g.game_status >= 2)).join('')}</div>`;
+      updateCharts(data.games);
     } catch(e) {
       document.getElementById('content').innerHTML = `<div class="state"><p>Could not load predictions.</p></div>`;
     }
   }
 
+  /* ── load yesterday ── */
   async function loadYesterday() {
     try {
       const data = await fetch(`${API}/api/yesterday`).then(r => r.json());
@@ -283,18 +328,19 @@
       }
       const correct = data.games.filter(g => {
         const hw = g.home_score > g.away_score;
-        return (hw && g.pred_winner === g.home_tri) || (!hw && g.pred_winner === g.away_tri);
+        return (hw && g.pred_winner===g.home_tri)||(!hw && g.pred_winner===g.away_tri);
       }).length;
-      lbl.textContent = `${label} Results — ${correct}/${data.games.length} correct`;
+      lbl.textContent = `${label} Results \u2014 ${correct}/${data.games.length} correct`;
       el.innerHTML = `<div class="games">${data.games.map(g => buildCard(g, false)).join('')}</div>`;
     } catch(e) {
-      document.getElementById('yesterday-content').innerHTML = `<div class="state" style="padding:40px 20px"><p>Could not load yesterday's results.</p></div>`;
+      document.getElementById('yesterday-content').innerHTML =
+        `<div class="state" style="padding:40px 20px"><p>Could not load yesterday's results.</p></div>`;
     }
   }
 
   load();
   loadYesterday();
-  setInterval(load, 5 * 60 * 1000);
+  setInterval(load, 60 * 1000);
 </script>
 </body>
 </html>
