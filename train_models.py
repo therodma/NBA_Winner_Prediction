@@ -18,6 +18,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, log_loss
 from sklearn.calibration import calibration_curve
+from sklearn.model_selection import cross_val_score
+from xgboost import XGBClassifier
 
 warnings.filterwarnings("ignore")
 
@@ -31,6 +33,9 @@ FEATURE_COLS = [
     "DIFF_REB", "DIFF_AST", "DIFF_TOV",
     "HOME_ROLL10_WIN_PCT", "AWAY_ROLL10_WIN_PCT", "DIFF_ROLL10_WIN_PCT",
     "HOME_ROLL10_PM", "AWAY_ROLL10_PM", "DIFF_ROLL10_PM",
+    "HOME_ROLL20_WIN_PCT", "AWAY_ROLL20_WIN_PCT", "DIFF_ROLL20_WIN_PCT",
+    "HOME_ROLL20_PM", "AWAY_ROLL20_PM", "DIFF_ROLL20_PM",
+    "HOME_STREAK", "AWAY_STREAK", "DIFF_STREAK",
     "HOME_REST", "AWAY_REST", "DIFF_REST",
     "HOME_B2B", "AWAY_B2B",
     "H2H_HOME_WIN_PCT",
@@ -63,25 +68,30 @@ def build_models():
         ("scaler", StandardScaler()),
         ("clf", LogisticRegression(max_iter=1000, C=0.5)),
     ])
-    rf = RandomForestClassifier(n_estimators=300, max_depth=6, min_samples_leaf=20, random_state=42)
-    gb = GradientBoostingClassifier(n_estimators=300, max_depth=3, learning_rate=0.05,
+    rf = RandomForestClassifier(n_estimators=400, max_depth=6, min_samples_leaf=15, random_state=42)
+    gb = GradientBoostingClassifier(n_estimators=400, max_depth=3, learning_rate=0.04,
                                     subsample=0.8, random_state=42)
+    xgb = XGBClassifier(n_estimators=400, max_depth=4, learning_rate=0.04,
+                        subsample=0.8, colsample_bytree=0.8, use_label_encoder=False,
+                        eval_metric="logloss", random_state=42, verbosity=0)
     ensemble = VotingClassifier(
-        estimators=[("lr", lr), ("rf", rf), ("gb", gb)],
+        estimators=[("lr", lr), ("rf", rf), ("gb", gb), ("xgb", xgb)],
         voting="soft",
     )
-    return {"LogisticRegression": lr, "RandomForest": rf, "GradientBoosting": gb, "Ensemble": ensemble}
+    return {"LogisticRegression": lr, "RandomForest": rf, "GradientBoosting": gb,
+            "XGBoost": xgb, "Ensemble": ensemble}
 
 
 # ── evaluation ────────────────────────────────────────────────────────────────
 
 def evaluate(name, model, X_train, X_test, y_train, y_test):
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring="accuracy")
     model.fit(X_train, y_train)
     preds  = model.predict(X_test)
     probs  = model.predict_proba(X_test)[:, 1]
     acc    = accuracy_score(y_test, preds)
     ll     = log_loss(y_test, probs)
-    print(f"  {name:20s}  acc={acc:.4f}  log_loss={ll:.4f}")
+    print(f"  {name:20s}  acc={acc:.4f}  log_loss={ll:.4f}  cv={cv_scores.mean():.4f}+/-{cv_scores.std():.4f}")
     return preds, probs
 
 

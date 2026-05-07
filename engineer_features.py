@@ -67,6 +67,17 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     features["AWAY_ROLL10_PM"]       = df["AWAY_ROLL10_PM"]
     features["DIFF_ROLL10_PM"]       = df["HOME_ROLL10_PM"] - df["AWAY_ROLL10_PM"]
 
+    features["HOME_ROLL20_WIN_PCT"]  = df["HOME_ROLL20_WIN_PCT"].fillna(0.5)
+    features["AWAY_ROLL20_WIN_PCT"]  = df["AWAY_ROLL20_WIN_PCT"].fillna(0.5)
+    features["DIFF_ROLL20_WIN_PCT"]  = features["HOME_ROLL20_WIN_PCT"] - features["AWAY_ROLL20_WIN_PCT"]
+    features["HOME_ROLL20_PM"]       = df["HOME_ROLL20_PM"].fillna(0.0)
+    features["AWAY_ROLL20_PM"]       = df["AWAY_ROLL20_PM"].fillna(0.0)
+    features["DIFF_ROLL20_PM"]       = features["HOME_ROLL20_PM"] - features["AWAY_ROLL20_PM"]
+
+    features["HOME_STREAK"]          = df["HOME_STREAK"].fillna(0)
+    features["AWAY_STREAK"]          = df["AWAY_STREAK"].fillna(0)
+    features["DIFF_STREAK"]          = features["HOME_STREAK"] - features["AWAY_STREAK"]
+
     # ── Rest / fatigue features ──────────────────────────────────────────────
     features["HOME_REST"]  = df["HOME_REST"]
     features["AWAY_REST"]  = df["AWAY_REST"]

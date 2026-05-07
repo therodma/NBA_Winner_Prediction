@@ -16,7 +16,7 @@ from nba_api.stats.endpoints import (
 RAW = Path("data/raw")
 RAW.mkdir(parents=True, exist_ok=True)
 
-SEASONS = ["2022-23", "2023-24", "2024-25"]
+SEASONS = ["2018-19", "2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25"]
 SLEEP = 0.6  # seconds between API calls
 
 
@@ -81,20 +81,34 @@ def add_rest_days(logs: pd.DataFrame) -> pd.DataFrame:
 # ── rolling 10-game form ──────────────────────────────────────────────────────
 
 def add_rolling_form(logs: pd.DataFrame) -> pd.DataFrame:
-    """Add rolling 10-game win% and point-differential per team (shift to avoid leakage)."""
+    """Add rolling 10/20-game win% and point-differential, plus current streak."""
     logs = logs.copy()
     logs["WIN"] = (logs["WL"] == "W").astype(float)
     logs["PLUS_MINUS"] = logs["PLUS_MINUS"].astype(float)
 
     grp = logs.groupby("TEAM_ID")
-    logs["ROLL10_WIN_PCT"] = (
-        grp["WIN"]
-        .transform(lambda x: x.shift(1).rolling(10, min_periods=1).mean())
-    )
-    logs["ROLL10_PLUS_MINUS"] = (
-        grp["PLUS_MINUS"]
-        .transform(lambda x: x.shift(1).rolling(10, min_periods=1).mean())
-    )
+    logs["ROLL10_WIN_PCT"] = grp["WIN"].transform(lambda x: x.shift(1).rolling(10, min_periods=1).mean())
+    logs["ROLL10_PLUS_MINUS"] = grp["PLUS_MINUS"].transform(lambda x: x.shift(1).rolling(10, min_periods=1).mean())
+    logs["ROLL20_WIN_PCT"] = grp["WIN"].transform(lambda x: x.shift(1).rolling(20, min_periods=1).mean())
+    logs["ROLL20_PLUS_MINUS"] = grp["PLUS_MINUS"].transform(lambda x: x.shift(1).rolling(20, min_periods=1).mean())
+
+    def calc_streak(series):
+        result = [0] * len(series)
+        vals = series.tolist()
+        for i in range(1, len(vals)):
+            if vals[i-1] == vals[i-1]:  # not nan
+                if i == 1:
+                    result[i] = 1 if vals[i-1] == 1.0 else -1
+                else:
+                    prev = result[i-1]
+                    if (prev > 0 and vals[i-1] == 1.0) or (prev < 0 and vals[i-1] == 0.0):
+                        result[i] = prev + (1 if vals[i-1] == 1.0 else -1)
+                    else:
+                        result[i] = 1 if vals[i-1] == 1.0 else -1
+        return result
+
+    logs["STREAK"] = grp["WIN"].transform(calc_streak)
+    return logs
     return logs
 
 
@@ -115,6 +129,9 @@ def build_matchup_table(logs: pd.DataFrame) -> pd.DataFrame:
         "REST_DAYS": "HOME_REST", "IS_B2B": "HOME_B2B",
         "ROLL10_WIN_PCT": "HOME_ROLL10_WIN_PCT",
         "ROLL10_PLUS_MINUS": "HOME_ROLL10_PM",
+        "ROLL20_WIN_PCT": "HOME_ROLL20_WIN_PCT",
+        "ROLL20_PLUS_MINUS": "HOME_ROLL20_PM",
+        "STREAK": "HOME_STREAK",
     })
     away = away.rename(columns={
         "TEAM_ID": "AWAY_TEAM_ID", "TEAM_ABBREVIATION": "AWAY_TEAM",
@@ -122,14 +139,19 @@ def build_matchup_table(logs: pd.DataFrame) -> pd.DataFrame:
         "REST_DAYS": "AWAY_REST", "IS_B2B": "AWAY_B2B",
         "ROLL10_WIN_PCT": "AWAY_ROLL10_WIN_PCT",
         "ROLL10_PLUS_MINUS": "AWAY_ROLL10_PM",
+        "ROLL20_WIN_PCT": "AWAY_ROLL20_WIN_PCT",
+        "ROLL20_PLUS_MINUS": "AWAY_ROLL20_PM",
+        "STREAK": "AWAY_STREAK",
     })
 
     home_cols = ["GAME_ID", "GAME_DATE", "SEASON",
                  "HOME_TEAM_ID", "HOME_TEAM", "HOME_PTS", "HOME_WIN",
-                 "HOME_REST", "HOME_B2B", "HOME_ROLL10_WIN_PCT", "HOME_ROLL10_PM"]
+                 "HOME_REST", "HOME_B2B", "HOME_ROLL10_WIN_PCT", "HOME_ROLL10_PM",
+                 "HOME_ROLL20_WIN_PCT", "HOME_ROLL20_PM", "HOME_STREAK"]
     away_cols = ["GAME_ID",
                  "AWAY_TEAM_ID", "AWAY_TEAM", "AWAY_PTS", "AWAY_WIN",
-                 "AWAY_REST", "AWAY_B2B", "AWAY_ROLL10_WIN_PCT", "AWAY_ROLL10_PM"]
+                 "AWAY_REST", "AWAY_B2B", "AWAY_ROLL10_WIN_PCT", "AWAY_ROLL10_PM",
+                 "AWAY_ROLL20_WIN_PCT", "AWAY_ROLL20_PM", "AWAY_STREAK"]
 
     matchups = home[home_cols].merge(away[away_cols], on="GAME_ID")
     matchups["POINT_MARGIN"] = matchups["HOME_PTS"] - matchups["AWAY_PTS"]

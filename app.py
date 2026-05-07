@@ -40,6 +40,9 @@ FEATURE_COLS = [
     "DIFF_REB", "DIFF_AST", "DIFF_TOV",
     "HOME_ROLL10_WIN_PCT", "AWAY_ROLL10_WIN_PCT", "DIFF_ROLL10_WIN_PCT",
     "HOME_ROLL10_PM", "AWAY_ROLL10_PM", "DIFF_ROLL10_PM",
+    "HOME_ROLL20_WIN_PCT", "AWAY_ROLL20_WIN_PCT", "DIFF_ROLL20_WIN_PCT",
+    "HOME_ROLL20_PM", "AWAY_ROLL20_PM", "DIFF_ROLL20_PM",
+    "HOME_STREAK", "AWAY_STREAK", "DIFF_STREAK",
     "HOME_REST", "AWAY_REST", "DIFF_REST",
     "HOME_B2B", "AWAY_B2B",
     "H2H_HOME_WIN_PCT",
@@ -73,9 +76,23 @@ _prob_history = {}
 def get_rolling_form(team_id):
     t = LOGS[LOGS["TEAM_ID"] == team_id].sort_values("GAME_DATE")
     last10 = t.tail(10)
+    last20 = t.tail(20)
     if len(last10) == 0:
-        return 0.5, 0.0
-    return (last10["WL"] == "W").mean(), last10["PLUS_MINUS"].astype(float).mean()
+        return 0.5, 0.0, 0.5, 0.0, 0
+    win10 = (last10["WL"] == "W").mean()
+    pm10  = last10["PLUS_MINUS"].astype(float).mean()
+    win20 = (last20["WL"] == "W").mean() if len(last20) > 0 else win10
+    pm20  = last20["PLUS_MINUS"].astype(float).mean() if len(last20) > 0 else pm10
+    # streak: positive = win streak, negative = loss streak
+    streak = 0
+    for _, row in t.iloc[::-1].iterrows():
+        if streak == 0:
+            streak = 1 if row["WL"] == "W" else -1
+        elif (streak > 0 and row["WL"] == "W") or (streak < 0 and row["WL"] == "L"):
+            streak += 1 if streak > 0 else -1
+        else:
+            break
+    return win10, pm10, win20, pm20, streak
 
 def get_rest(team_id):
     t = LOGS[LOGS["TEAM_ID"] == team_id].sort_values("GAME_DATE")
@@ -103,8 +120,8 @@ def get_stats(team_id):
 
 def build_features(home_id, away_id):
     hs, as_ = get_stats(home_id), get_stats(away_id)
-    hwp, hpm = get_rolling_form(home_id)
-    awp, apm = get_rolling_form(away_id)
+    hwp, hpm, hwp20, hpm20, hstreak = get_rolling_form(home_id)
+    awp, apm, awp20, apm20, astreak = get_rolling_form(away_id)
     hr, hb2b = get_rest(home_id)
     ar, ab2b = get_rest(away_id)
     h2h = get_h2h(home_id, away_id)
@@ -120,10 +137,16 @@ def build_features(home_id, away_id):
         "DIFF_REB":            hs["REB"]         - as_["REB"],
         "DIFF_AST":            hs["AST"]         - as_["AST"],
         "DIFF_TOV":            hs["TOV"]         - as_["TOV"],
-        "HOME_ROLL10_WIN_PCT": hwp, "AWAY_ROLL10_WIN_PCT": awp,
+        "HOME_ROLL10_WIN_PCT": hwp,  "AWAY_ROLL10_WIN_PCT": awp,
         "DIFF_ROLL10_WIN_PCT": hwp - awp,
-        "HOME_ROLL10_PM":      hpm, "AWAY_ROLL10_PM": apm,
+        "HOME_ROLL10_PM":      hpm,  "AWAY_ROLL10_PM": apm,
         "DIFF_ROLL10_PM":      hpm - apm,
+        "HOME_ROLL20_WIN_PCT": hwp20, "AWAY_ROLL20_WIN_PCT": awp20,
+        "DIFF_ROLL20_WIN_PCT": hwp20 - awp20,
+        "HOME_ROLL20_PM":      hpm20, "AWAY_ROLL20_PM": apm20,
+        "DIFF_ROLL20_PM":      hpm20 - apm20,
+        "HOME_STREAK": hstreak, "AWAY_STREAK": astreak,
+        "DIFF_STREAK": hstreak - astreak,
         "HOME_REST": hr, "AWAY_REST": ar, "DIFF_REST": hr - ar,
         "HOME_B2B": hb2b, "AWAY_B2B": ab2b,
         "H2H_HOME_WIN_PCT": h2h,
