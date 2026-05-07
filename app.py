@@ -66,7 +66,17 @@ MARGIN_MODEL = joblib.load(MODELS_DIR / "margin_regressor.pkl")
 LOGS         = pd.read_csv(RAW / "game_logs.csv",  parse_dates=["GAME_DATE"])
 MATCHUPS     = pd.read_csv(RAW / "matchups.csv",   parse_dates=["GAME_DATE"])
 STATS        = pd.read_csv(RAW / "team_stats.csv")
+HOME_COURT   = pd.read_csv(RAW / "home_court_strength.csv") if (RAW / "home_court_strength.csv").exists() else pd.DataFrame()
 print("Ready.")
+
+TEAM_TIMEZONE = {
+    "ATL": -5, "BOS": -5, "BKN": -5, "CHA": -5, "CHI": -6,
+    "CLE": -5, "DAL": -6, "DEN": -7, "DET": -5, "GSW": -8,
+    "HOU": -6, "IND": -5, "LAC": -8, "LAL": -8, "MEM": -6,
+    "MIA": -5, "MIL": -6, "MIN": -6, "NOP": -6, "NYK": -5,
+    "OKC": -6, "ORL": -5, "PHI": -5, "PHX": -7, "POR": -8,
+    "SAC": -8, "SAS": -6, "TOR": -5, "UTA": -7, "WAS": -5,
+}
 
 # ── in-memory cache ───────────────────────────────────────────────────────────
 
@@ -461,6 +471,19 @@ def refresh_cache():
     except Exception as e:
         print(f"[cache] refresh error: {e}")
 
+# ── start scheduler (runs on Render + locally) ───────────────────────────────
+
+_scheduler = BackgroundScheduler()
+_scheduler.add_job(refresh_cache, "interval", seconds=60)
+_scheduler.add_job(refresh_cache, "cron", hour=0, minute=5)
+_scheduler.add_job(
+    lambda: requests.get("https://nba-winner-prediction.onrender.com/", timeout=10),
+    "interval", minutes=10
+)
+_scheduler.start()
+threading.Thread(target=refresh_cache, daemon=True).start()  # warm cache immediately
+print("Scheduler started — cache warming up in background.")
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -514,17 +537,6 @@ def yesterday():
 
 if __name__ == "__main__":
     import webbrowser
-
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(refresh_cache, "interval", seconds=60)
-    scheduler.add_job(refresh_cache, "cron", hour=0, minute=5)
-    scheduler.add_job(
-        lambda: requests.get("https://nba-winner-prediction.onrender.com/", timeout=10),
-        "interval", minutes=10
-    )
-    scheduler.start()
-    print("Scheduler started — refreshing every 60s, pinging every 10 min.")
-
     threading.Timer(1.2, lambda: webbrowser.open("http://localhost:5000")).start()
     print("NBA Predictions running at http://localhost:5000")
     app.run(host="0.0.0.0", port=5000, debug=False)
