@@ -38,14 +38,18 @@ GIST_HEADERS = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application
 FEATURE_COLS = [
     "DIFF_OFF_RATING", "DIFF_DEF_RATING", "DIFF_NET_RATING", "DIFF_PACE",
     "DIFF_W_PCT", "DIFF_FG_PCT", "DIFF_FG3_PCT", "DIFF_FT_PCT",
-    "DIFF_REB", "DIFF_AST", "DIFF_TOV",
+    "DIFF_REB", "DIFF_AST", "DIFF_TOV", "DIFF_STL", "DIFF_BLK",
+    "DIFF_OREB", "DIFF_DREB", "DIFF_TS_PCT", "DIFF_AST_PCT",
+    "DIFF_REB_PCT", "DIFF_TM_TOV_PCT",
     "HOME_ROLL10_WIN_PCT", "AWAY_ROLL10_WIN_PCT", "DIFF_ROLL10_WIN_PCT",
-    "HOME_ROLL10_PM", "AWAY_ROLL10_PM", "DIFF_ROLL10_PM",
+    "HOME_ROLL10_PM",      "AWAY_ROLL10_PM",      "DIFF_ROLL10_PM",
     "HOME_ROLL20_WIN_PCT", "AWAY_ROLL20_WIN_PCT", "DIFF_ROLL20_WIN_PCT",
-    "HOME_ROLL20_PM", "AWAY_ROLL20_PM", "DIFF_ROLL20_PM",
+    "HOME_ROLL20_PM",      "AWAY_ROLL20_PM",      "DIFF_ROLL20_PM",
     "HOME_STREAK", "AWAY_STREAK", "DIFF_STREAK",
-    "HOME_REST", "AWAY_REST", "DIFF_REST",
-    "HOME_B2B", "AWAY_B2B",
+    "HOME_REST",   "AWAY_REST",   "DIFF_REST",
+    "HOME_B2B",    "AWAY_B2B",
+    "HOME_COURT_STRENGTH", "AWAY_COURT_STRENGTH", "DIFF_COURT_STRENGTH",
+    "AWAY_TRAVEL_TZ_DIFF",
     "H2H_HOME_WIN_PCT",
 ]
 
@@ -115,25 +119,50 @@ def get_stats(team_id):
     s = STATS[STATS["TEAM_ID"] == team_id].sort_values("SEASON")
     return s.iloc[-1] if len(s) else pd.Series(dtype=float)
 
-def build_features(home_id, away_id):
+def get_home_court_strength(team_id):
+    if HOME_COURT.empty:
+        return 0.0
+    row = HOME_COURT[HOME_COURT["TEAM_ID"] == team_id].sort_values("SEASON")
+    return float(row["HOME_COURT_STRENGTH"].iloc[-1]) if len(row) else 0.0
+
+def build_features(home_id, away_id, home_tri="", away_tri=""):
     hs, as_ = get_stats(home_id), get_stats(away_id)
     hwp, hpm, hwp20, hpm20, hstreak = get_rolling_form(home_id)
     awp, apm, awp20, apm20, astreak = get_rolling_form(away_id)
     hr, hb2b = get_rest(home_id)
     ar, ab2b = get_rest(away_id)
-    h2h = get_h2h(home_id, away_id)
+    h2h      = get_h2h(home_id, away_id)
+    hcs      = get_home_court_strength(home_id)
+    acs      = get_home_court_strength(away_id)
+    home_tz  = TEAM_TIMEZONE.get(home_tri, -6)
+    away_tz  = TEAM_TIMEZONE.get(away_tri, -6)
+    tz_diff  = abs(home_tz - away_tz)
+
+    def diff(col):
+        hv = float(hs[col]) if col in hs.index else 0.0
+        av = float(as_[col]) if col in as_.index else 0.0
+        return hv - av
+
     return {
-        "DIFF_OFF_RATING":     hs["OFF_RATING"]  - as_["OFF_RATING"],
-        "DIFF_DEF_RATING":     hs["DEF_RATING"]  - as_["DEF_RATING"],
-        "DIFF_NET_RATING":     hs["NET_RATING"]  - as_["NET_RATING"],
-        "DIFF_PACE":           hs["PACE"]        - as_["PACE"],
-        "DIFF_W_PCT":          hs["W_PCT"]       - as_["W_PCT"],
-        "DIFF_FG_PCT":         hs["FG_PCT"]      - as_["FG_PCT"],
-        "DIFF_FG3_PCT":        hs["FG3_PCT"]     - as_["FG3_PCT"],
-        "DIFF_FT_PCT":         hs["FT_PCT"]      - as_["FT_PCT"],
-        "DIFF_REB":            hs["REB"]         - as_["REB"],
-        "DIFF_AST":            hs["AST"]         - as_["AST"],
-        "DIFF_TOV":            hs["TOV"]         - as_["TOV"],
+        "DIFF_OFF_RATING":  diff("OFF_RATING"),
+        "DIFF_DEF_RATING":  diff("DEF_RATING"),
+        "DIFF_NET_RATING":  diff("NET_RATING"),
+        "DIFF_PACE":        diff("PACE"),
+        "DIFF_W_PCT":       diff("W_PCT"),
+        "DIFF_FG_PCT":      diff("FG_PCT"),
+        "DIFF_FG3_PCT":     diff("FG3_PCT"),
+        "DIFF_FT_PCT":      diff("FT_PCT"),
+        "DIFF_REB":         diff("REB"),
+        "DIFF_AST":         diff("AST"),
+        "DIFF_TOV":         diff("TOV"),
+        "DIFF_STL":         diff("STL"),
+        "DIFF_BLK":         diff("BLK"),
+        "DIFF_OREB":        diff("OREB"),
+        "DIFF_DREB":        diff("DREB"),
+        "DIFF_TS_PCT":      diff("TS_PCT"),
+        "DIFF_AST_PCT":     diff("AST_PCT"),
+        "DIFF_REB_PCT":     diff("REB_PCT"),
+        "DIFF_TM_TOV_PCT":  diff("TM_TOV_PCT"),
         "HOME_ROLL10_WIN_PCT": hwp,  "AWAY_ROLL10_WIN_PCT": awp,
         "DIFF_ROLL10_WIN_PCT": hwp - awp,
         "HOME_ROLL10_PM":      hpm,  "AWAY_ROLL10_PM": apm,
@@ -143,9 +172,13 @@ def build_features(home_id, away_id):
         "HOME_ROLL20_PM":      hpm20, "AWAY_ROLL20_PM": apm20,
         "DIFF_ROLL20_PM":      hpm20 - apm20,
         "HOME_STREAK": hstreak, "AWAY_STREAK": astreak,
-        "DIFF_STREAK": hstreak - astreak,
+        "DIFF_STREAK":  hstreak - astreak,
         "HOME_REST": hr, "AWAY_REST": ar, "DIFF_REST": hr - ar,
         "HOME_B2B": hb2b, "AWAY_B2B": ab2b,
+        "HOME_COURT_STRENGTH": hcs,
+        "AWAY_COURT_STRENGTH": acs,
+        "DIFF_COURT_STRENGTH": hcs - acs,
+        "AWAY_TRAVEL_TZ_DIFF": tz_diff,
         "H2H_HOME_WIN_PCT": h2h,
     }
 
@@ -341,7 +374,7 @@ def fetch_predictions():
         away_score  = g["awayTeam"]["score"]
         game_id     = g["gameId"]
         try:
-            feats = build_features(home_id, away_id)
+            feats = build_features(home_id, away_id, home_tri, away_tri)
             X = pd.DataFrame([feats], columns=FEATURE_COLS).values
             probs, preds = {}, {}
             for name, model in MODELS.items():

@@ -1,138 +1,133 @@
 """
 engineer_features.py — Step 2: Feature Engineering
-Joins matchups with season-level team stats and produces the final feature matrix.
-Output: data/processed/features.csv
 """
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
-RAW = Path("data/raw")
+RAW       = Path("data/raw")
 PROCESSED = Path("data/processed")
 PROCESSED.mkdir(parents=True, exist_ok=True)
 
 
 def load_data():
-    matchups = pd.read_csv(RAW / "matchups.csv", parse_dates=["GAME_DATE"])
+    matchups   = pd.read_csv(RAW / "matchups.csv",            parse_dates=["GAME_DATE"])
     team_stats = pd.read_csv(RAW / "team_stats.csv")
-    return matchups, team_stats
+    hcs        = pd.read_csv(RAW / "home_court_strength.csv")
+    return matchups, team_stats, hcs
 
 
-def join_team_stats(matchups: pd.DataFrame, team_stats: pd.DataFrame) -> pd.DataFrame:
-    """Attach season-level stats for home and away teams."""
+def join_team_stats(matchups, team_stats, hcs):
     home_stats = team_stats.add_prefix("H_").rename(columns={"H_TEAM_ID": "HOME_TEAM_ID", "H_SEASON": "SEASON"})
     away_stats = team_stats.add_prefix("A_").rename(columns={"A_TEAM_ID": "AWAY_TEAM_ID", "A_SEASON": "SEASON"})
+    home_hcs   = hcs.rename(columns={"TEAM_ID": "HOME_TEAM_ID", "SEASON": "SEASON",
+                                      "HOME_COURT_STRENGTH": "HOME_COURT_STRENGTH"})
+    away_hcs   = hcs.rename(columns={"TEAM_ID": "AWAY_TEAM_ID", "SEASON": "SEASON",
+                                      "HOME_COURT_STRENGTH": "AWAY_COURT_STRENGTH"})
 
     df = matchups.merge(home_stats, on=["HOME_TEAM_ID", "SEASON"], how="left")
-    df = df.merge(away_stats, on=["AWAY_TEAM_ID", "SEASON"], how="left")
+    df = df.merge(away_stats,       on=["AWAY_TEAM_ID", "SEASON"], how="left")
+    df = df.merge(home_hcs[["HOME_TEAM_ID", "SEASON", "HOME_COURT_STRENGTH"]],
+                  on=["HOME_TEAM_ID", "SEASON"], how="left")
+    df = df.merge(away_hcs[["AWAY_TEAM_ID", "SEASON", "AWAY_COURT_STRENGTH"]],
+                  on=["AWAY_TEAM_ID", "SEASON"], how="left")
     return df
 
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute all difference and derived features."""
-    # Fill nulls in rolling columns (first games of season have no prior history)
-    df["HOME_ROLL10_WIN_PCT"] = df["HOME_ROLL10_WIN_PCT"].fillna(0.5)
-    df["AWAY_ROLL10_WIN_PCT"] = df["AWAY_ROLL10_WIN_PCT"].fillna(0.5)
-    df["HOME_ROLL10_PM"] = df["HOME_ROLL10_PM"].fillna(0.0)
-    df["AWAY_ROLL10_PM"] = df["AWAY_ROLL10_PM"].fillna(0.0)
+def build_features(df):
+    for col, fill in [
+        ("HOME_ROLL10_WIN_PCT", 0.5), ("AWAY_ROLL10_WIN_PCT", 0.5),
+        ("HOME_ROLL10_PM", 0.0),      ("AWAY_ROLL10_PM", 0.0),
+        ("HOME_ROLL20_WIN_PCT", 0.5), ("AWAY_ROLL20_WIN_PCT", 0.5),
+        ("HOME_ROLL20_PM", 0.0),      ("AWAY_ROLL20_PM", 0.0),
+        ("HOME_STREAK", 0),           ("AWAY_STREAK", 0),
+        ("HOME_COURT_STRENGTH", 0.0), ("AWAY_COURT_STRENGTH", 0.0),
+    ]:
+        df[col] = df[col].fillna(fill)
 
-    features = pd.DataFrame()
+    f = pd.DataFrame()
+    f["GAME_ID"]   = df["GAME_ID"]
+    f["GAME_DATE"] = df["GAME_DATE"]
+    f["SEASON"]    = df["SEASON"]
+    f["HOME_TEAM"] = df["HOME_TEAM"]
+    f["AWAY_TEAM"] = df["AWAY_TEAM"]
 
-    # Identifiers (not used as model inputs)
-    features["GAME_ID"]    = df["GAME_ID"]
-    features["GAME_DATE"]  = df["GAME_DATE"]
-    features["SEASON"]     = df["SEASON"]
-    features["HOME_TEAM"]  = df["HOME_TEAM"]
-    features["AWAY_TEAM"]  = df["AWAY_TEAM"]
+    # season-level diffs
+    for stat in ["OFF_RATING", "DEF_RATING", "NET_RATING", "PACE",
+                 "W_PCT", "FG_PCT", "FG3_PCT", "FT_PCT",
+                 "REB", "AST", "TOV", "STL", "BLK",
+                 "OREB", "DREB", "TS_PCT", "AST_PCT", "REB_PCT", "TM_TOV_PCT"]:
+        h, a = f"H_{stat}", f"A_{stat}"
+        if h in df.columns and a in df.columns:
+            f[f"DIFF_{stat}"] = df[h] - df[a]
 
-    # ── Season-level difference features (home minus away) ──────────────────
-    features["DIFF_OFF_RATING"]  = df["H_OFF_RATING"]  - df["A_OFF_RATING"]
-    features["DIFF_DEF_RATING"]  = df["H_DEF_RATING"]  - df["A_DEF_RATING"]
-    features["DIFF_NET_RATING"]  = df["H_NET_RATING"]  - df["A_NET_RATING"]
-    features["DIFF_PACE"]        = df["H_PACE"]        - df["A_PACE"]
-    features["DIFF_W_PCT"]       = df["H_W_PCT"]       - df["A_W_PCT"]
-    features["DIFF_FG_PCT"]      = df["H_FG_PCT"]      - df["A_FG_PCT"]
-    features["DIFF_FG3_PCT"]     = df["H_FG3_PCT"]     - df["A_FG3_PCT"]
-    features["DIFF_FT_PCT"]      = df["H_FT_PCT"]      - df["A_FT_PCT"]
-    features["DIFF_REB"]         = df["H_REB"]         - df["A_REB"]
-    features["DIFF_AST"]         = df["H_AST"]         - df["A_AST"]
-    features["DIFF_TOV"]         = df["H_TOV"]         - df["A_TOV"]  # positive = home turns it over more
+    # rolling form
+    f["HOME_ROLL10_WIN_PCT"]  = df["HOME_ROLL10_WIN_PCT"]
+    f["AWAY_ROLL10_WIN_PCT"]  = df["AWAY_ROLL10_WIN_PCT"]
+    f["DIFF_ROLL10_WIN_PCT"]  = df["HOME_ROLL10_WIN_PCT"] - df["AWAY_ROLL10_WIN_PCT"]
+    f["HOME_ROLL10_PM"]       = df["HOME_ROLL10_PM"]
+    f["AWAY_ROLL10_PM"]       = df["AWAY_ROLL10_PM"]
+    f["DIFF_ROLL10_PM"]       = df["HOME_ROLL10_PM"] - df["AWAY_ROLL10_PM"]
+    f["HOME_ROLL20_WIN_PCT"]  = df["HOME_ROLL20_WIN_PCT"]
+    f["AWAY_ROLL20_WIN_PCT"]  = df["AWAY_ROLL20_WIN_PCT"]
+    f["DIFF_ROLL20_WIN_PCT"]  = df["HOME_ROLL20_WIN_PCT"] - df["AWAY_ROLL20_WIN_PCT"]
+    f["HOME_ROLL20_PM"]       = df["HOME_ROLL20_PM"]
+    f["AWAY_ROLL20_PM"]       = df["AWAY_ROLL20_PM"]
+    f["DIFF_ROLL20_PM"]       = df["HOME_ROLL20_PM"] - df["AWAY_ROLL20_PM"]
+    f["HOME_STREAK"]          = df["HOME_STREAK"]
+    f["AWAY_STREAK"]          = df["AWAY_STREAK"]
+    f["DIFF_STREAK"]          = df["HOME_STREAK"] - df["AWAY_STREAK"]
 
-    # ── Rolling form features ────────────────────────────────────────────────
-    features["HOME_ROLL10_WIN_PCT"]  = df["HOME_ROLL10_WIN_PCT"]
-    features["AWAY_ROLL10_WIN_PCT"]  = df["AWAY_ROLL10_WIN_PCT"]
-    features["DIFF_ROLL10_WIN_PCT"]  = df["HOME_ROLL10_WIN_PCT"] - df["AWAY_ROLL10_WIN_PCT"]
-    features["HOME_ROLL10_PM"]       = df["HOME_ROLL10_PM"]
-    features["AWAY_ROLL10_PM"]       = df["AWAY_ROLL10_PM"]
-    features["DIFF_ROLL10_PM"]       = df["HOME_ROLL10_PM"] - df["AWAY_ROLL10_PM"]
+    # rest / fatigue
+    f["HOME_REST"]  = df["HOME_REST"]
+    f["AWAY_REST"]  = df["AWAY_REST"]
+    f["DIFF_REST"]  = df["HOME_REST"] - df["AWAY_REST"]
+    f["HOME_B2B"]   = df["HOME_B2B"]
+    f["AWAY_B2B"]   = df["AWAY_B2B"]
 
-    features["HOME_ROLL20_WIN_PCT"]  = df["HOME_ROLL20_WIN_PCT"].fillna(0.5)
-    features["AWAY_ROLL20_WIN_PCT"]  = df["AWAY_ROLL20_WIN_PCT"].fillna(0.5)
-    features["DIFF_ROLL20_WIN_PCT"]  = features["HOME_ROLL20_WIN_PCT"] - features["AWAY_ROLL20_WIN_PCT"]
-    features["HOME_ROLL20_PM"]       = df["HOME_ROLL20_PM"].fillna(0.0)
-    features["AWAY_ROLL20_PM"]       = df["AWAY_ROLL20_PM"].fillna(0.0)
-    features["DIFF_ROLL20_PM"]       = features["HOME_ROLL20_PM"] - features["AWAY_ROLL20_PM"]
+    # home court strength
+    f["HOME_COURT_STRENGTH"]  = df["HOME_COURT_STRENGTH"]
+    f["AWAY_COURT_STRENGTH"]  = df["AWAY_COURT_STRENGTH"]
+    f["DIFF_COURT_STRENGTH"]  = df["HOME_COURT_STRENGTH"] - df["AWAY_COURT_STRENGTH"]
 
-    features["HOME_STREAK"]          = df["HOME_STREAK"].fillna(0)
-    features["AWAY_STREAK"]          = df["AWAY_STREAK"].fillna(0)
-    features["DIFF_STREAK"]          = features["HOME_STREAK"] - features["AWAY_STREAK"]
+    # travel timezone disadvantage for away team
+    f["AWAY_TRAVEL_TZ_DIFF"]  = df["AWAY_TRAVEL_TZ_DIFF"].fillna(0)
 
-    # ── Rest / fatigue features ──────────────────────────────────────────────
-    features["HOME_REST"]  = df["HOME_REST"]
-    features["AWAY_REST"]  = df["AWAY_REST"]
-    features["DIFF_REST"]  = df["HOME_REST"] - df["AWAY_REST"]
-    features["HOME_B2B"]   = df["HOME_B2B"]
-    features["AWAY_B2B"]   = df["AWAY_B2B"]
+    # H2H
+    f["H2H_HOME_WIN_PCT"] = df["H2H_HOME_WIN_PCT"]
 
-    # ── H2H ─────────────────────────────────────────────────────────────────
-    features["H2H_HOME_WIN_PCT"] = df["H2H_HOME_WIN_PCT"]
+    # targets
+    f["HOME_TEAM_WIN"] = df["HOME_TEAM_WIN"]
+    f["POINT_MARGIN"]  = df["POINT_MARGIN"]
 
-    # ── Targets ─────────────────────────────────────────────────────────────
-    features["HOME_TEAM_WIN"] = df["HOME_TEAM_WIN"]
-    features["POINT_MARGIN"]  = df["POINT_MARGIN"]
-
-    return features.sort_values("GAME_DATE").reset_index(drop=True)
+    return f.sort_values("GAME_DATE").reset_index(drop=True)
 
 
 def main():
     print("Loading raw data...")
-    matchups, team_stats = load_data()
-    print(f"  {len(matchups)} matchups, {len(team_stats)} team-season rows")
+    matchups, team_stats, hcs = load_data()
+    print(f"  {len(matchups)} matchups")
 
-    print("Joining team stats...")
-    df = join_team_stats(matchups, team_stats)
-
-    missing = df[["H_OFF_RATING", "A_OFF_RATING"]].isnull().sum()
-    if missing.any():
-        print(f"  WARNING: {missing.to_dict()} nulls after join — check TEAM_ID/SEASON alignment")
+    print("Joining stats...")
+    df = join_team_stats(matchups, team_stats, hcs)
 
     print("Building features...")
     features = build_features(df)
+    features.to_csv(PROCESSED / "features.csv", index=False)
 
-    out_path = PROCESSED / "features.csv"
-    features.to_csv(out_path, index=False)
-
-    print(f"  {len(features)} rows, {len(features.columns)} columns -> data/processed/features.csv")
-    print()
-
-    # Quick sanity check
     model_cols = [c for c in features.columns if c not in
                   ("GAME_ID", "GAME_DATE", "SEASON", "HOME_TEAM", "AWAY_TEAM",
                    "HOME_TEAM_WIN", "POINT_MARGIN")]
-    print(f"Feature columns ({len(model_cols)}):")
-    for c in model_cols:
-        print(f"  {c:30s}  mean={features[c].mean():.3f}  std={features[c].std():.3f}")
+    print(f"  {len(features)} rows, {len(model_cols)} feature columns -> features.csv")
 
-    print()
-    null_counts = features.isnull().sum()
-    null_counts = null_counts[null_counts > 0]
-    if len(null_counts):
-        print("Remaining nulls:", null_counts.to_dict())
+    nulls = features[model_cols].isnull().sum()
+    nulls = nulls[nulls > 0]
+    if len(nulls):
+        print("  Nulls:", nulls.to_dict())
     else:
-        print("No nulls in feature matrix.")
-
-    print("\nDone.")
+        print("  No nulls.")
+    print("Done.")
 
 
 if __name__ == "__main__":
