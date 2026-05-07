@@ -19,7 +19,7 @@ from flask_cors import CORS
 
 from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
 from nba_api.live.nba.endpoints import boxscore as live_boxscore
-from nba_api.stats.endpoints import CommonTeamRoster, PlayerCareerStats
+from nba_api.stats.endpoints import LeagueDashPlayerStats
 
 warnings.filterwarnings("ignore")
 
@@ -66,25 +66,21 @@ print("Ready.")
 
 # ── in-memory cache ───────────────────────────────────────────────────────────
 
-_cache = {"data": None, "updated": None}
+_cache      = {"data": None, "updated": None}
 _cache_lock = threading.Lock()
-
-# prob history: {game_id: [{time, home_prob}]}
-_prob_history = {}
+_prob_history = {}  # {game_id: [{t, home_prob}]}
 
 # ── feature helpers ───────────────────────────────────────────────────────────
 
 def get_rolling_form(team_id):
     t = LOGS[LOGS["TEAM_ID"] == team_id].sort_values("GAME_DATE")
-    last10 = t.tail(10)
-    last20 = t.tail(20)
+    last10, last20 = t.tail(10), t.tail(20)
     if len(last10) == 0:
         return 0.5, 0.0, 0.5, 0.0, 0
     win10 = (last10["WL"] == "W").mean()
     pm10  = last10["PLUS_MINUS"].astype(float).mean()
     win20 = (last20["WL"] == "W").mean() if len(last20) > 0 else win10
     pm20  = last20["PLUS_MINUS"].astype(float).mean() if len(last20) > 0 else pm10
-    # streak: positive = win streak, negative = loss streak
     streak = 0
     for _, row in t.iloc[::-1].iterrows():
         if streak == 0:
@@ -183,23 +179,6 @@ def parse_players(team_data):
     players.sort(key=lambda x: (-x["pts"], not x["starter"]))
     return players
 
-def parse_team_stats(team_data):
-    s = team_data["statistics"]
-    return {
-        "pts":     s["points"],
-        "reb":     s["reboundsTotal"],
-        "ast":     s["assists"],
-        "tov":     s["turnoversTotal"],
-        "fg_pct":  round(s["fieldGoalsPercentage"] * 100, 1),
-        "3p_pct":  round(s["threePointersPercentage"] * 100, 1),
-        "ft_pct":  round(s["freeThrowsPercentage"] * 100, 1),
-        "stl":     s["steals"],
-        "blk":     s["blocks"],
-        "paint":   s["pointsInThePaint"],
-        "fb_pts":  s["pointsFastBreak"],
-        "biggest_lead": s["biggestLead"],
-    }
-
 # ── history helpers (GitHub Gist) ─────────────────────────────────────────────
 
 def load_history():
@@ -229,80 +208,58 @@ def save_results(date_str, games):
     except Exception as e:
         print(f"[gist] save error: {e}")
 
-# ── injury / lineup helpers ───────────────────────────────────────────────────
+# ── injury / player helpers ───────────────────────────────────────────────────
 
-_injury_cache = {"data": {}, "updated": None}
+_injury_cache      = {"data": {}, "updated": None}
+_player_stats_cache = {"data": {}, "updated": None}
 
-def fetch_injury_report():
-    """Fetch today's injury report from NBA stats API."""
+def fetch_player_stats():
     try:
         time.sleep(SLEEP)
-        url = "https://stats.nba.com/js/data/leaders/00_player_status.json"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.nba.com/",
-            "Accept": "application/json",
-        }
-        r = requests.get(url, headers=headers, timeout=10)
-        data = r.json()
-        report = {}
-        for player in data.get("playerStatuses", []):
-            tid  = player.get("teamId")
-            name = player.get("playerName", "")
-            status = player.get("playerStatus", "")   # Out, Questionable, Doubtful, Available
-            reason = player.get("injuryDescription", "")
-            if tid not in report:
-                report[tid] = []
-            report[tid].append({"name": name, "status": status, "reason": reason})
-        _injury_cache["data"] = report
-        _injury_cache["updated"] = datetime.now(timezone.utc)
-        return report
+        df = LeagueDashPlayerStats(
+            season="2024-25",
+            season_type_all_star="Regular Season",
+            per_mode_detailed="PerGame",
+        ).get_data_frames()[0]
+        df["IMPACT"] = (
+            df["PTS"] * 1.0 + df["AST"] * 0.7 + df["REB"] * 0.4 +
+            df["STL"] * 1.0 + df["BLK"] * 0.7 - df["TOV"] * 0.5
+        )
+        result = {}
+        for _, row in df.iterrows():
+            result[row["PLAYER_NAME"]] = {"impact": float(row["IMPACT"]), "pts": float(row["PTS"])}
+        _player_stats_cache["data"]    = result
+        _player_stats_cache["updated"] = datetime.now(timezone.utc)
+        return result
     except Exception as e:
-        print(f"[injury] fetch error: {e}")
-        return _injury_cache["data"]
+        print(f"[player_stats] fetch error: {e}")
+        return _player_stats_cache["data"]
 
-def get_injury_report():
-    """Return cached injury report, refreshing if older than 10 minutes."""
-    updated = _injury_cache["updated"]
-    if updated is None or (datetime.now(timezone.utc) - updated).seconds > 600:
-        return fetch_injury_report()
-    return _injury_cache["data"]
+def get_player_stats():
+    updated = _player_stats_cache["updated"]
+    if updated is None or (datetime.now(timezone.utc) - updated).seconds > 3600:
+        return fetch_player_stats()
+    return _player_stats_cache["data"]
 
-def injury_adjustment(team_id, injury_report):
-    """
-    Return a win probability adjustment based on player availability.
-    Out star players reduce win prob, questionable slightly reduce.
-    Uses a simple points-based impact estimate.
-    """
-    players = injury_report.get(team_id, [])
-    adjustment = 0.0
-    for p in players:
-        status = p["status"].lower()
-        if status == "out":
-            adjustment -= 0.025   # each out player reduces prob ~2.5%
-        elif status == "doubtful":
-            adjustment -= 0.015
-        elif status == "questionable":
-            adjustment -= 0.007
-    return max(-0.15, adjustment)  # cap at -15% total
-
-# ── injury / lineup helpers ──────────────────────────────────────────────────
-
-_injury_cache = {"data": {}, "updated": None}
+def player_impact_adj(player_name, player_stats):
+    """Win prob shift if this player is out. Star=5%, solid=3.5%, role=2%, bench=1%."""
+    p = player_stats.get(player_name)
+    if not p:
+        return 0.02
+    impact = p["impact"]
+    if impact >= 30:   return 0.05
+    elif impact >= 20: return 0.035
+    elif impact >= 10: return 0.02
+    else:              return 0.01
 
 def fetch_injury_report():
     try:
         time.sleep(SLEEP)
-        url = "https://stats.nba.com/js/data/leaders/00_player_status.json"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://www.nba.com/",
-            "Accept": "application/json",
-        }
-        r = requests.get(url, headers=headers, timeout=10)
-        data = r.json()
+        url  = "https://stats.nba.com/js/data/leaders/00_player_status.json"
+        hdrs = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.nba.com/", "Accept": "application/json"}
+        r    = requests.get(url, headers=hdrs, timeout=10)
         report = {}
-        for player in data.get("playerStatuses", []):
+        for player in r.json().get("playerStatuses", []):
             tid    = player.get("teamId")
             name   = player.get("playerName", "")
             status = player.get("playerStatus", "")
@@ -324,18 +281,41 @@ def get_injury_report():
     return _injury_cache["data"]
 
 def injury_adjustment(team_id, injury_report):
-    """
-    Win probability adjustment based on player availability.
-    Out = -2.5%, Doubtful = -1.5%, Questionable = -0.7%, capped at -15%.
-    """
-    players = injury_report.get(team_id, [])
+    """Flat adjustment for confirmed out/doubtful players."""
     adj = 0.0
-    for p in players:
+    for p in injury_report.get(team_id, []):
         s = p["status"].lower()
-        if s == "out":          adj -= 0.025
-        elif s == "doubtful":   adj -= 0.015
+        if s == "out":            adj -= 0.025
+        elif s == "doubtful":     adj -= 0.015
         elif s == "questionable": adj -= 0.007
     return max(-0.15, adj)
+
+def build_scenarios(base_prob, home_id, away_id, injury_report, player_stats):
+    """
+    For each questionable/doubtful player, return two win prob scenarios:
+    - if they play vs if they don't.
+    """
+    scenarios = []
+    for team_id, is_home in [(home_id, True), (away_id, False)]:
+        for p in injury_report.get(team_id, []):
+            if p["status"].lower() not in ("questionable", "doubtful"):
+                continue
+            adj = player_impact_adj(p["name"], player_stats)
+            if is_home:
+                plays_prob = round(min(0.99, max(0.01, base_prob + adj)), 3)
+                sits_prob  = round(min(0.99, max(0.01, base_prob - adj)), 3)
+            else:
+                plays_prob = round(min(0.99, max(0.01, base_prob - adj)), 3)
+                sits_prob  = round(min(0.99, max(0.01, base_prob + adj)), 3)
+            scenarios.append({
+                "player":          p["name"],
+                "status":          p["status"],
+                "reason":          p.get("reason", ""),
+                "team":            "home" if is_home else "away",
+                "plays_home_prob": plays_prob,
+                "sits_home_prob":  sits_prob,
+            })
+    return scenarios
 
 # ── core prediction fetch ─────────────────────────────────────────────────────
 
@@ -344,16 +324,17 @@ def fetch_predictions():
     sb    = live_scoreboard.ScoreBoard()
     games = sb.get_dict()["scoreboard"]["games"]
     injury_report = get_injury_report()
+    player_stats  = get_player_stats()
     results = []
     for g in games:
-        home_id   = g["homeTeam"]["teamId"]
-        away_id   = g["awayTeam"]["teamId"]
-        home_tri  = g["homeTeam"]["teamTricode"]
-        away_tri  = g["awayTeam"]["teamTricode"]
-        home_name = g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"]
-        away_name = g["awayTeam"]["teamCity"] + " " + g["awayTeam"]["teamName"]
-        home_rec  = f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}"
-        away_rec  = f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}"
+        home_id     = g["homeTeam"]["teamId"]
+        away_id     = g["awayTeam"]["teamId"]
+        home_tri    = g["homeTeam"]["teamTricode"]
+        away_tri    = g["awayTeam"]["teamTricode"]
+        home_name   = g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"]
+        away_name   = g["awayTeam"]["teamCity"] + " " + g["awayTeam"]["teamName"]
+        home_rec    = f"{g['homeTeam']['wins']}-{g['homeTeam']['losses']}"
+        away_rec    = f"{g['awayTeam']['wins']}-{g['awayTeam']['losses']}"
         status      = g["gameStatusText"]
         game_status = g["gameStatus"]
         home_score  = g["homeTeam"]["score"]
@@ -367,10 +348,10 @@ def fetch_predictions():
                 p = model.predict_proba(X)[0, 1]
                 probs[name] = round(float(p), 3)
                 preds[name] = int(p >= 0.5)
-            margin    = float(MARGIN_MODEL.predict(X)[0])
-            raw_prob  = probs["Ensemble"]
+            margin   = float(MARGIN_MODEL.predict(X)[0])
+            raw_prob = probs["Ensemble"]
 
-            # apply injury adjustments (pre-game only)
+            # apply injury adjustments pre-game
             if game_status == 1:
                 home_adj  = injury_adjustment(home_id, injury_report)
                 away_adj  = injury_adjustment(away_id, injury_report)
@@ -385,7 +366,7 @@ def fetch_predictions():
                 for m in ["LogisticRegression", "RandomForest", "GradientBoosting"]
             )
 
-            # track prob history
+            # track prob history for live games
             if game_status == 2:
                 ts = datetime.now(timezone.utc).strftime("%H:%M")
                 if game_id not in _prob_history:
@@ -396,8 +377,9 @@ def fetch_predictions():
                     if len(hist) > 100:
                         hist.pop(0)
 
-            home_injuries = injury_report.get(home_id, [])
-            away_injuries = injury_report.get(away_id, [])
+            # build scenarios for questionable/doubtful players
+            scenarios = build_scenarios(home_prob, home_id, away_id, injury_report, player_stats) \
+                        if game_status == 1 else []
 
             results.append({
                 "home_tri": home_tri, "away_tri": away_tri,
@@ -416,9 +398,10 @@ def fetch_predictions():
                 "prob_gb": probs["GradientBoosting"],
                 "home_b2b": bool(feats["HOME_B2B"]),
                 "away_b2b": bool(feats["AWAY_B2B"]),
-                "prob_history": _prob_history.get(game_id, []),
-                "home_injuries": home_injuries,
-                "away_injuries": away_injuries,
+                "prob_history":   _prob_history.get(game_id, []),
+                "home_injuries":  injury_report.get(home_id, []),
+                "away_injuries":  injury_report.get(away_id, []),
+                "scenarios":      scenarios,
             })
         except Exception as e:
             results.append({
@@ -438,15 +421,12 @@ def refresh_cache():
         results = fetch_predictions()
         updated = datetime.now(timezone.utc).strftime("%I:%M %p UTC")
         with _cache_lock:
-            _cache["data"] = results
+            _cache["data"]    = results
             _cache["updated"] = updated
         save_results(date.today().isoformat(), results)
         print(f"[cache] refreshed at {updated}")
     except Exception as e:
         print(f"[cache] refresh error: {e}")
-
-def scheduled_save():
-    refresh_cache()
 
 # ── routes ────────────────────────────────────────────────────────────────────
 
@@ -462,11 +442,8 @@ def get_boxscore(game_id):
         data      = bs.get_dict()["game"]
         home_data = data["homeTeam"]
         away_data = data["awayTeam"]
-        def parse_periods(team_data):
-            return [
-                {"period": p["period"], "type": p["periodType"], "score": p["score"]}
-                for p in team_data["periods"]
-            ]
+        def parse_periods(td):
+            return [{"period": p["period"], "type": p["periodType"], "score": p["score"]} for p in td["periods"]]
         return jsonify({
             "home_tri":     home_data["teamTricode"],
             "away_tri":     away_data["teamTricode"],
@@ -487,38 +464,33 @@ def predictions():
         updated = _cache["updated"]
     if data is None:
         try:
-            data = fetch_predictions()
+            data    = fetch_predictions()
             updated = datetime.now(timezone.utc).strftime("%I:%M %p UTC")
             with _cache_lock:
-                _cache["data"] = data
+                _cache["data"]    = data
                 _cache["updated"] = updated
         except Exception as e:
             return jsonify({"error": str(e), "games": []})
-    return jsonify({
-        "games":   data,
-        "date":    date.today().isoformat(),
-        "updated": updated,
-    })
+    return jsonify({"games": data, "date": date.today().isoformat(), "updated": updated})
 
 @app.route("/api/yesterday")
 def yesterday():
-    history = load_history()
+    history       = load_history()
     yesterday_str = (date.today() - timedelta(days=1)).isoformat()
-    games = history.get(yesterday_str, [])
-    return jsonify({"games": games, "date": yesterday_str})
+    return jsonify({"games": history.get(yesterday_str, []), "date": yesterday_str})
 
 if __name__ == "__main__":
     import webbrowser
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(refresh_cache, "interval", seconds=60)
-    scheduler.add_job(scheduled_save, "cron", hour=0, minute=5)
+    scheduler.add_job(refresh_cache, "cron", hour=0, minute=5)
     scheduler.add_job(
         lambda: requests.get("https://nba-winner-prediction.onrender.com/", timeout=10),
         "interval", minutes=10
     )
     scheduler.start()
-    print("Scheduler started — refreshing every 60s, saving nightly at 12:05 AM.")
+    print("Scheduler started — refreshing every 60s, pinging every 10 min.")
 
     threading.Timer(1.2, lambda: webbrowser.open("http://localhost:5000")).start()
     print("NBA Predictions running at http://localhost:5000")

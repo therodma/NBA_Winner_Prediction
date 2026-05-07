@@ -106,6 +106,16 @@
     .injury-status.out{background:#f5ece9;color:var(--red)}
     .injury-status.doubtful{background:#fdf3e7;color:#9b6a1a}
     .injury-status.questionable{background:#fdf8e7;color:#8a7a1a}
+    .scenarios-wrap{border-top:1px solid var(--border-light);padding:12px 32px;background:var(--bg)}
+    .scenarios-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+    .scenario-row{display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:.75rem;flex-wrap:wrap}
+    .scenario-player{font-weight:500;color:var(--ink);min-width:120px}
+    .scenario-block{display:flex;flex-direction:column;gap:2px;flex:1}
+    .scenario-case{display:flex;align-items:center;gap:6px}
+    .scenario-tag{font-size:.58rem;font-weight:500;padding:1px 6px;border-radius:2px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap}
+    .scenario-tag.plays{background:#e8f2ec;color:var(--green)}
+    .scenario-tag.sits{background:#f5ece9;color:var(--red)}
+    .scenario-prob{font-size:.78rem;color:var(--ink)}
     footer{background:var(--bg-footer);border-top:1px solid var(--border);padding:24px;text-align:center}
     footer p{font-size:.68rem;color:var(--ink-3);line-height:1.7}
     footer strong{font-weight:500;color:var(--ink-2)}
@@ -323,6 +333,28 @@
     const injurySection = (homeInjHtml || awayInjHtml) && g.game_status === 1 ? `
       <div class="injury-wrap">${homeInjHtml}${awayInjHtml}</div>` : '';
 
+    const scenariosSection = (g.scenarios && g.scenarios.length > 0) ? (() => {
+      const rows = g.scenarios.map(s => {
+        const teamTri = s.team === 'home' ? g.home_tri : g.away_tri;
+        const playsWinner = s.plays_home_prob >= 0.5 ? g.home_tri : g.away_tri;
+        const sitsWinner  = s.sits_home_prob  >= 0.5 ? g.home_tri : g.away_tri;
+        const playsPct = Math.round(s.plays_home_prob * 100);
+        const sitsPct  = Math.round(s.sits_home_prob  * 100);
+        return `<div class="scenario-row">
+          <span class="scenario-player">${s.player} <span style="color:var(--ink-3);font-size:.65rem">(${teamTri})</span></span>
+          <div class="scenario-block">
+            <div class="scenario-case"><span class="scenario-tag plays">Plays</span>
+              <span class="scenario-prob">${g.home_tri} ${playsPct}% &middot; ${g.away_tri} ${100-playsPct}% &rarr; <strong>${playsWinner}</strong></span>
+            </div>
+            <div class="scenario-case"><span class="scenario-tag sits">Sits</span>
+              <span class="scenario-prob">${g.home_tri} ${sitsPct}% &middot; ${g.away_tri} ${100-sitsPct}% &rarr; <strong>${sitsWinner}</strong></span>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="scenarios-wrap"><div class="scenarios-label">Scenarios</div>${rows}</div>`;
+    })() : '';
+
       <div class="chart-wrap">
         <div class="chart-label">${g.home_tri} vs ${g.away_tri} — win probability over time</div>
         <div class="chart-container"><canvas id="chart-${g.game_id}" class="sparkline"></canvas></div>
@@ -363,6 +395,7 @@
         <div class="stat-item"><span class="stat-label">LR &middot; RF &middot; GB</span><span class="stat-value">${pct(g.prob_lr)} &nbsp;&middot;&nbsp; ${pct(g.prob_rf)} &nbsp;&middot;&nbsp; ${pct(g.prob_gb)}</span></div>
       </div>
       ${injurySection}
+      ${scenariosSection}
       ${chartSection}
       ${bsSection}
     </div>`;
