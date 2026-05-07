@@ -448,7 +448,6 @@ def refresh_cache():
         with _cache_lock:
             _cache["data"]    = results
             _cache["updated"] = updated
-        save_results(date.today().isoformat(), results)
         print(f"[cache] refreshed at {updated}")
     except Exception as e:
         print(f"[cache] refresh error: {e}")

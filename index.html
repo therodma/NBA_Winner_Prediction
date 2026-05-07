@@ -147,8 +147,6 @@
 <main>
   <div class="section-label" id="games-label">Today's Games</div>
   <div id="content"><div class="state"><div class="spinner"></div><p>Fetching today's games&hellip;</p></div></div>
-  <div class="section-label" style="margin-top:48px" id="yesterday-label">Yesterday's Results</div>
-  <div id="yesterday-content"><div class="state" style="padding:40px 20px"><div class="spinner"></div><p>Loading&hellip;</p></div></div>
 </main>
 <footer>
   <p><strong>Ensemble model</strong> &mdash; Logistic Regression · Random Forest · Gradient Boosting<br>
@@ -446,7 +444,6 @@
   }
 
   load();
-  loadYesterday();
   setInterval(load, 10 * 1000);
 </script>
 </body>
