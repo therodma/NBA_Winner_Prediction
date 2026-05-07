@@ -98,6 +98,14 @@
     .bs-pm-neg{color:var(--red)!important}
     .bs-loading{padding:24px 32px;font-size:.78rem;color:var(--ink-3);font-style:italic}
     .card-error{padding:20px 32px;font-size:.78rem;color:var(--ink-3);font-style:italic}
+    .injury-wrap{border-top:1px solid var(--border-light);padding:12px 32px;background:var(--bg-card);display:flex;gap:24px}
+    .injury-team{flex:1}
+    .injury-team-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+    .injury-row{font-size:.72rem;color:var(--ink-2);display:flex;align-items:center;gap:6px;margin-bottom:3px}
+    .injury-status{font-size:.58rem;font-weight:500;padding:1px 5px;border-radius:2px;text-transform:uppercase;letter-spacing:.08em}
+    .injury-status.out{background:#f5ece9;color:var(--red)}
+    .injury-status.doubtful{background:#fdf3e7;color:#9b6a1a}
+    .injury-status.questionable{background:#fdf8e7;color:#8a7a1a}
     footer{background:var(--bg-footer);border-top:1px solid var(--border);padding:24px;text-align:center}
     footer p{font-size:.68rem;color:var(--ink-3);line-height:1.7}
     footer strong{font-weight:500;color:var(--ink-2)}
@@ -300,7 +308,21 @@
     const pips = [0,1,2].map(i=>`<div class="pip ${i<agreeCount?'on':''}"></div>`).join('');
     const hB2b = g.home_b2b ? `<div class="b2b-tag">B2B</div>` : '';
     const aB2b = g.away_b2b ? `<div class="b2b-tag">B2B</div>` : '';
-    const chartSection = g.game_status === 2 ? `
+    function injuryHtml(players, tri) {
+      const notable = (players || []).filter(p => ['out','doubtful','questionable'].includes(p.status.toLowerCase()));
+      if (!notable.length) return '';
+      const rows = notable.map(p => {
+        const s = p.status.toLowerCase();
+        return `<div class="injury-row"><span class="injury-status ${s}">${p.status}</span> ${p.name}${p.reason ? ` <span style="color:var(--ink-3);font-size:.65rem">&mdash; ${p.reason}</span>` : ''}</div>`;
+      }).join('');
+      return `<div class="injury-team"><div class="injury-team-label">${tri}</div>${rows}</div>`;
+    }
+
+    const homeInjHtml = injuryHtml(g.home_injuries, g.home_tri);
+    const awayInjHtml = injuryHtml(g.away_injuries, g.away_tri);
+    const injurySection = (homeInjHtml || awayInjHtml) && g.game_status === 1 ? `
+      <div class="injury-wrap">${homeInjHtml}${awayInjHtml}</div>` : '';
+
       <div class="chart-wrap">
         <div class="chart-label">${g.home_tri} vs ${g.away_tri} — win probability over time</div>
         <div class="chart-container"><canvas id="chart-${g.game_id}" class="sparkline"></canvas></div>
@@ -340,6 +362,7 @@
         <div class="stat-item"><span class="stat-label">Model Consensus <span class="label-hint">(LR &middot; RF &middot; GB)</span></span><div class="pips">${pips}</div></div>
         <div class="stat-item"><span class="stat-label">LR &middot; RF &middot; GB</span><span class="stat-value">${pct(g.prob_lr)} &nbsp;&middot;&nbsp; ${pct(g.prob_rf)} &nbsp;&middot;&nbsp; ${pct(g.prob_gb)}</span></div>
       </div>
+      ${injurySection}
       ${chartSection}
       ${bsSection}
     </div>`;
