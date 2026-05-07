@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
       --bg:#f7f3ec;--bg-card:#fdfaf5;--bg-footer:#f0ebe0;
@@ -73,7 +74,8 @@
     .pip.on{background:var(--green)}
     .chart-wrap{padding:0 32px 16px;background:var(--bg-card)}
     .chart-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
-    canvas.sparkline{width:100%;height:56px;display:none;border-radius:2px}
+    .chart-container{position:relative;height:120px;width:100%}
+    canvas.sparkline{display:none}
     .boxscore-toggle{border-top:1px solid var(--border-light);background:var(--bg);padding:0}
     .toggle-btn{width:100%;background:none;border:none;cursor:pointer;padding:11px 32px;display:flex;align-items:center;justify-content:space-between;font-family:'Inter',sans-serif;font-size:.62rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);transition:color .15s}
     .toggle-btn:hover{color:var(--ink-2)}
@@ -149,36 +151,85 @@
   document.getElementById('today-date').textContent =
     new Date().toLocaleDateString('en-US', {month:'long',day:'numeric',year:'numeric'});
 
-  /* ── sparkline ── */
-  function drawSparkline(canvas, history, homeColor) {
-    if (!history || history.length < 2) { canvas.style.display='none'; return; }
-    canvas.style.display = 'block';
-    const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle='rgba(0,0,0,0.06)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
-    ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke();
-    ctx.setLineDash([]);
-    const probs = history.map(h => h.home_prob);
-    const xStep = W / (probs.length - 1);
-    ctx.beginPath();
-    probs.forEach((p,i) => { const x=i*xStep,y=H-p*H; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-    ctx.lineTo((probs.length-1)*xStep,H); ctx.lineTo(0,H); ctx.closePath();
-    const grad = ctx.createLinearGradient(0,0,0,H);
-    grad.addColorStop(0,homeColor+'55'); grad.addColorStop(1,homeColor+'00');
-    ctx.fillStyle=grad; ctx.fill();
-    ctx.beginPath();
-    probs.forEach((p,i) => { const x=i*xStep,y=H-p*H; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-    ctx.strokeStyle=homeColor; ctx.lineWidth=2; ctx.stroke();
-    const lx=(probs.length-1)*xStep, ly=H-probs[probs.length-1]*H;
-    ctx.beginPath(); ctx.arc(lx,ly,3,0,Math.PI*2); ctx.fillStyle=homeColor; ctx.fill();
-  }
+  /* ── Chart.js line graph ── */
+  const _charts = {};
 
   function updateCharts(games) {
     games.forEach(g => {
       if (!g.prob_history || g.prob_history.length < 2) return;
       const canvas = document.getElementById('chart-' + g.game_id);
       if (!canvas) return;
-      drawSparkline(canvas, g.prob_history, COLORS[g.home_tri] || '#1c1917');
+      const hc = COLORS[g.home_tri] || '#1c1917';
+      const ac = COLORS[g.away_tri] || '#1c1917';
+      const labels = g.prob_history.map(h => h.t);
+      const homeData = g.prob_history.map(h => Math.round(h.home_prob * 100));
+      const awayData = homeData.map(v => 100 - v);
+
+      if (_charts[g.game_id]) {
+        const chart = _charts[g.game_id];
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = homeData;
+        chart.data.datasets[1].data = awayData;
+        chart.update('none');
+      } else {
+        canvas.style.display = 'block';
+        _charts[g.game_id] = new Chart(canvas, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: g.home_tri,
+                data: homeData,
+                borderColor: hc,
+                backgroundColor: hc + '22',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 2,
+                borderWidth: 2,
+              },
+              {
+                label: g.away_tri,
+                data: awayData,
+                borderColor: ac,
+                backgroundColor: ac + '22',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 2,
+                borderWidth: 2,
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+              legend: {
+                display: true,
+                position: 'top',
+                labels: { font: { size: 10, family: 'Inter' }, boxWidth: 10, padding: 8 }
+              },
+              tooltip: {
+                callbacks: {
+                  label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}%`
+                }
+              }
+            },
+            scales: {
+              y: {
+                min: 0, max: 100,
+                ticks: { callback: v => v + '%', font: { size: 9 }, stepSize: 25 },
+                grid: { color: 'rgba(0,0,0,0.04)' }
+              },
+              x: {
+                ticks: { font: { size: 9 }, maxTicksLimit: 8 },
+                grid: { display: false }
+              }
+            }
+          }
+        });
+      }
     });
   }
 
@@ -251,8 +302,8 @@
     const aB2b = g.away_b2b ? `<div class="b2b-tag">B2B</div>` : '';
     const chartSection = g.game_status === 2 ? `
       <div class="chart-wrap">
-        <div class="chart-label">${g.home_tri} win probability trend</div>
-        <canvas id="chart-${g.game_id}" class="sparkline" width="756" height="56"></canvas>
+        <div class="chart-label">${g.home_tri} vs ${g.away_tri} — win probability over time</div>
+        <div class="chart-container"><canvas id="chart-${g.game_id}" class="sparkline"></canvas></div>
       </div>` : '';
     const bsSection = showBoxScore ? `
       <div class="boxscore-toggle">
