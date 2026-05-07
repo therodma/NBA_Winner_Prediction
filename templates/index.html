@@ -712,60 +712,30 @@
       document.getElementById('content').innerHTML = `<div class="state"><p>Could not load predictions.</p></div>`;
     }
   }
-  load();
-  setInterval(load, 10 * 1000);
-</script>
+
+  /* ── sparkline chart ── */
   function drawSparkline(canvas, history, homeColor, awayColor) {
-    if (!history || history.length < 2) {
-      canvas.style.display = 'none';
-      return;
-    }
+    if (!history || history.length < 2) { canvas.style.display = 'none'; return; }
     canvas.style.display = 'block';
     const ctx = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0, 0, W, H);
-
-    // midline
-    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
     ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
     ctx.setLineDash([]);
-
     const probs = history.map(h => h.home_prob);
     const xStep = W / (probs.length - 1);
-
-    // fill
     ctx.beginPath();
-    probs.forEach((p, i) => {
-      const x = i * xStep, y = H - p * H;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
-    ctx.lineTo((probs.length - 1) * xStep, H);
-    ctx.lineTo(0, H);
-    ctx.closePath();
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, homeColor + '55');
-    grad.addColorStop(1, homeColor + '00');
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // line
+    probs.forEach((p, i) => { const x = i*xStep, y = H-p*H; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.lineTo((probs.length-1)*xStep, H); ctx.lineTo(0, H); ctx.closePath();
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0, homeColor+'55'); grad.addColorStop(1, homeColor+'00');
+    ctx.fillStyle = grad; ctx.fill();
     ctx.beginPath();
-    probs.forEach((p, i) => {
-      const x = i * xStep, y = H - p * H;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
-    ctx.strokeStyle = homeColor;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // last dot
-    const lx = (probs.length - 1) * xStep, ly = H - probs[probs.length-1] * H;
-    ctx.beginPath();
-    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
-    ctx.fillStyle = homeColor;
-    ctx.fill();
+    probs.forEach((p, i) => { const x = i*xStep, y = H-p*H; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.strokeStyle = homeColor; ctx.lineWidth = 2; ctx.stroke();
+    const lx = (probs.length-1)*xStep, ly = H-probs[probs.length-1]*H;
+    ctx.beginPath(); ctx.arc(lx, ly, 3, 0, Math.PI*2); ctx.fillStyle = homeColor; ctx.fill();
   }
 
   function updateCharts(games) {
@@ -773,9 +743,7 @@
       if (!g.prob_history || g.prob_history.length < 2) return;
       const canvas = document.getElementById('chart-' + g.game_id);
       if (!canvas) return;
-      const hc = COLORS[g.home_tri] || '#1c1917';
-      const ac = COLORS[g.away_tri] || '#1c1917';
-      drawSparkline(canvas, g.prob_history, hc, ac);
+      drawSparkline(canvas, g.prob_history, COLORS[g.home_tri]||'#1c1917', COLORS[g.away_tri]||'#1c1917');
     });
   }
 

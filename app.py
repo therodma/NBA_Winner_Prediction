@@ -444,7 +444,7 @@ def fetch_predictions():
 def refresh_cache():
     try:
         results = fetch_predictions()
-        updated = datetime.now(timezone.utc).strftime("%I:%M %p UTC")
+        updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST")
         with _cache_lock:
             _cache["data"]    = results
             _cache["updated"] = updated
@@ -502,7 +502,7 @@ def predictions():
     if data is None:
         try:
             data    = fetch_predictions()
-            updated = datetime.now(timezone.utc).strftime("%I:%M %p UTC")
+            updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST")
             with _cache_lock:
                 _cache["data"]    = data
                 _cache["updated"] = updated
