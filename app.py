@@ -19,6 +19,7 @@ from flask_cors import CORS
 
 from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
 from nba_api.live.nba.endpoints import boxscore as live_boxscore
+from nba_api.stats.endpoints import CommonTeamRoster, PlayerCareerStats
 
 warnings.filterwarnings("ignore")
 
@@ -228,12 +229,121 @@ def save_results(date_str, games):
     except Exception as e:
         print(f"[gist] save error: {e}")
 
-# ── core prediction fetch (used by cache + scheduler) ─────────────────────────
+# ── injury / lineup helpers ───────────────────────────────────────────────────
+
+_injury_cache = {"data": {}, "updated": None}
+
+def fetch_injury_report():
+    """Fetch today's injury report from NBA stats API."""
+    try:
+        time.sleep(SLEEP)
+        url = "https://stats.nba.com/js/data/leaders/00_player_status.json"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.nba.com/",
+            "Accept": "application/json",
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        data = r.json()
+        report = {}
+        for player in data.get("playerStatuses", []):
+            tid  = player.get("teamId")
+            name = player.get("playerName", "")
+            status = player.get("playerStatus", "")   # Out, Questionable, Doubtful, Available
+            reason = player.get("injuryDescription", "")
+            if tid not in report:
+                report[tid] = []
+            report[tid].append({"name": name, "status": status, "reason": reason})
+        _injury_cache["data"] = report
+        _injury_cache["updated"] = datetime.now(timezone.utc)
+        return report
+    except Exception as e:
+        print(f"[injury] fetch error: {e}")
+        return _injury_cache["data"]
+
+def get_injury_report():
+    """Return cached injury report, refreshing if older than 10 minutes."""
+    updated = _injury_cache["updated"]
+    if updated is None or (datetime.now(timezone.utc) - updated).seconds > 600:
+        return fetch_injury_report()
+    return _injury_cache["data"]
+
+def injury_adjustment(team_id, injury_report):
+    """
+    Return a win probability adjustment based on player availability.
+    Out star players reduce win prob, questionable slightly reduce.
+    Uses a simple points-based impact estimate.
+    """
+    players = injury_report.get(team_id, [])
+    adjustment = 0.0
+    for p in players:
+        status = p["status"].lower()
+        if status == "out":
+            adjustment -= 0.025   # each out player reduces prob ~2.5%
+        elif status == "doubtful":
+            adjustment -= 0.015
+        elif status == "questionable":
+            adjustment -= 0.007
+    return max(-0.15, adjustment)  # cap at -15% total
+
+# ── injury / lineup helpers ──────────────────────────────────────────────────
+
+_injury_cache = {"data": {}, "updated": None}
+
+def fetch_injury_report():
+    try:
+        time.sleep(SLEEP)
+        url = "https://stats.nba.com/js/data/leaders/00_player_status.json"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://www.nba.com/",
+            "Accept": "application/json",
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        data = r.json()
+        report = {}
+        for player in data.get("playerStatuses", []):
+            tid    = player.get("teamId")
+            name   = player.get("playerName", "")
+            status = player.get("playerStatus", "")
+            reason = player.get("injuryDescription", "")
+            if tid not in report:
+                report[tid] = []
+            report[tid].append({"name": name, "status": status, "reason": reason})
+        _injury_cache["data"]    = report
+        _injury_cache["updated"] = datetime.now(timezone.utc)
+        return report
+    except Exception as e:
+        print(f"[injury] fetch error: {e}")
+        return _injury_cache["data"]
+
+def get_injury_report():
+    updated = _injury_cache["updated"]
+    if updated is None or (datetime.now(timezone.utc) - updated).seconds > 600:
+        return fetch_injury_report()
+    return _injury_cache["data"]
+
+def injury_adjustment(team_id, injury_report):
+    """
+    Win probability adjustment based on player availability.
+    Out = -2.5%, Doubtful = -1.5%, Questionable = -0.7%, capped at -15%.
+    """
+    players = injury_report.get(team_id, [])
+    adj = 0.0
+    for p in players:
+        s = p["status"].lower()
+        if s == "out":          adj -= 0.025
+        elif s == "doubtful":   adj -= 0.015
+        elif s == "questionable": adj -= 0.007
+    return max(-0.15, adj)
+
+# ── core prediction fetch ─────────────────────────────────────────────────────
 
 def fetch_predictions():
     time.sleep(SLEEP)
     sb    = live_scoreboard.ScoreBoard()
     games = sb.get_dict()["scoreboard"]["games"]
+    injury_report = get_injury_report()
     results = []
     for g in games:
         home_id   = g["homeTeam"]["teamId"]
@@ -257,15 +367,25 @@ def fetch_predictions():
                 p = model.predict_proba(X)[0, 1]
                 probs[name] = round(float(p), 3)
                 preds[name] = int(p >= 0.5)
-            margin      = float(MARGIN_MODEL.predict(X)[0])
-            home_prob   = probs["Ensemble"]
+            margin    = float(MARGIN_MODEL.predict(X)[0])
+            raw_prob  = probs["Ensemble"]
+
+            # apply injury adjustments (pre-game only)
+            if game_status == 1:
+                home_adj  = injury_adjustment(home_id, injury_report)
+                away_adj  = injury_adjustment(away_id, injury_report)
+                home_prob = round(min(0.99, max(0.01, raw_prob + home_adj - away_adj)), 3)
+            else:
+                home_prob = raw_prob
+
             away_prob   = round(1 - home_prob, 3)
             pred_winner = home_tri if home_prob >= 0.5 else away_tri
             agreement   = sum(
                 preds[m] == preds["Ensemble"]
                 for m in ["LogisticRegression", "RandomForest", "GradientBoosting"]
             )
-            # track prob history for live games
+
+            # track prob history
             if game_status == 2:
                 ts = datetime.now(timezone.utc).strftime("%H:%M")
                 if game_id not in _prob_history:
@@ -273,8 +393,12 @@ def fetch_predictions():
                 hist = _prob_history[game_id]
                 if not hist or hist[-1]["home_prob"] != home_prob:
                     hist.append({"t": ts, "home_prob": home_prob})
-                    if len(hist) > 50:
+                    if len(hist) > 100:
                         hist.pop(0)
+
+            home_injuries = injury_report.get(home_id, [])
+            away_injuries = injury_report.get(away_id, [])
+
             results.append({
                 "home_tri": home_tri, "away_tri": away_tri,
                 "home_name": home_name, "away_name": away_name,
@@ -293,6 +417,8 @@ def fetch_predictions():
                 "home_b2b": bool(feats["HOME_B2B"]),
                 "away_b2b": bool(feats["AWAY_B2B"]),
                 "prob_history": _prob_history.get(game_id, []),
+                "home_injuries": home_injuries,
+                "away_injuries": away_injuries,
             })
         except Exception as e:
             results.append({
