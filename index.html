@@ -197,14 +197,14 @@
     if (g.game_status === 1) {
       centerHtml = `<span class="vs-text">vs</span><span class="game-time">${g.status}</span>`;
     } else if (g.game_status === 2) {
-      centerHtml = `<span class="vs-text">vs</span><span class="live-badge">Live</span><span class="game-time">${g.status}</span>`;
+      centerHtml = `<span class="vs-text">vs</span><span class="live-badge">Live</span><span id="status-${g.game_id}" class="game-time">${g.status}</span>`;
     } else {
       centerHtml = `<span class="final-badge">Final</span>`;
     }
     if (g.game_status >= 2 && (g.home_score > 0 || g.away_score > 0)) {
       const hw = g.home_score > g.away_score;
-      homeScoreHtml = `<span class="final-score"><span class="${hw?'winner-score':'loser-score'}">${g.home_score}</span></span>`;
-      awayScoreHtml = `<span class="final-score" style="display:block;text-align:right"><span class="${!hw?'winner-score':'loser-score'}">${g.away_score}</span></span>`;
+      homeScoreHtml = `<span class="final-score"><span id="home-score-${g.game_id}" class="${hw?'winner-score':'loser-score'}">${g.home_score}</span></span>`;
+      awayScoreHtml = `<span class="final-score" style="display:block;text-align:right"><span id="away-score-${g.game_id}" class="${!hw?'winner-score':'loser-score'}">${g.away_score}</span></span>`;
       if (g.game_status === 3) {
         const ok = (hw && g.pred_winner===g.home_tri)||(!hw && g.pred_winner===g.away_tri);
         resultBadge = `<span class="result-badge ${ok?'correct':'wrong'}">${ok?'Correct':'Wrong'}</span>`;
@@ -305,6 +305,26 @@
     });
   }
 
+  /* ── live score updater ── */
+  async function updateLiveScores(games) {
+    for (const g of games) {
+      if (g.game_status !== 2) continue;
+      try {
+        const data = await fetch(`${API}/api/boxscore/${g.game_id}`).then(r => r.json());
+        if (data.error) continue;
+        const homeScoreEl = document.getElementById(`home-score-${g.game_id}`);
+        const awayScoreEl = document.getElementById(`away-score-${g.game_id}`);
+        const statusEl    = document.getElementById(`status-${g.game_id}`);
+        if (homeScoreEl) homeScoreEl.textContent = data.home_score;
+        if (awayScoreEl) awayScoreEl.textContent = data.away_score;
+        if (statusEl && data.home_periods && data.home_periods.length > 0) {
+          const lastPeriod = data.home_periods[data.home_periods.length - 1];
+          statusEl.textContent = `Q${lastPeriod.period}`;
+        }
+      } catch(e) {}
+    }
+  }
+
   async function load() {
     try {
       const data = await fetch(`${API}/api/predictions`).then(r => r.json());
@@ -319,6 +339,7 @@
       lbl.textContent = `${data.games.length} Game${data.games.length > 1 ? 's' : ''} Today`;
       el.innerHTML = `<div class="games">${data.games.map(buildCard).join('')}</div>`;
       updateCharts(data.games);
+      updateLiveScores(data.games);
     } catch(e) {
       document.getElementById('content').innerHTML = `<div class="state"><p>Could not load predictions.</p></div>`;
     }
