@@ -264,7 +264,10 @@
   }
 
   function drawSparkline(canvas, history, homeColor) {
-    if (!history || history.length < 2) { canvas.style.display='none'; return; }
+    if (!history || history.length < 1) { canvas.style.display='none'; return; }
+    if (history.length === 1) {
+      history = [history[0], history[0]];
+    }
     canvas.style.display = 'block';
     const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
     ctx.clearRect(0,0,W,H);

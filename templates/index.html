@@ -715,7 +715,7 @@
 
   /* ── sparkline chart ── */
   function drawSparkline(canvas, history, homeColor, awayColor) {
-    if (!history || history.length < 2) { canvas.style.display = 'none'; return; }
+    if (!history || history.length < 1) { canvas.style.display = 'none'; return; }  if (history.length === 1) history = [history[0], history[0]];
     canvas.style.display = 'block';
     const ctx = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
@@ -740,7 +740,7 @@
 
   function updateCharts(games) {
     games.forEach(g => {
-      if (!g.prob_history || g.prob_history.length < 2) return;
+      if (!g.prob_history || g.prob_history.length < 1) return;
       const canvas = document.getElementById('chart-' + g.game_id);
       if (!canvas) return;
       drawSparkline(canvas, g.prob_history, COLORS[g.home_tri]||'#1c1917', COLORS[g.away_tri]||'#1c1917');
