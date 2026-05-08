@@ -342,7 +342,77 @@ def build_scenarios(base_prob, home_id, away_id, injury_report, player_stats):
             })
     return scenarios
 
-# ── core prediction fetch ─────────────────────────────────────────────────────
+def build_analysis(home_tri, away_tri, feats, home_prob, home_injuries, away_injuries, player_stats):
+    """Generate a plain-English pre-game analysis summary."""
+    lines = []
+    fav  = home_tri if home_prob >= 0.5 else away_tri
+    dog  = away_tri if home_prob >= 0.5 else home_tri
+    fav_prob = round(max(home_prob, 1-home_prob) * 100)
+
+    lines.append(f"{fav} are favored at {fav_prob}% to win.")
+
+    # net rating edge
+    net = feats.get("DIFF_NET_RATING", 0)
+    if abs(net) >= 3:
+        better = home_tri if net > 0 else away_tri
+        lines.append(f"{better} have a significant net rating edge ({abs(net):.1f} pts/100).")
+
+    # rolling form
+    h10 = feats.get("HOME_ROLL10_WIN_PCT", 0.5)
+    a10 = feats.get("AWAY_ROLL10_WIN_PCT", 0.5)
+    if abs(h10 - a10) >= 0.2:
+        hotter = home_tri if h10 > a10 else away_tri
+        lines.append(f"{hotter} are in better recent form (last 10 games).")
+
+    # streak
+    hs = feats.get("HOME_STREAK", 0)
+    as_ = feats.get("AWAY_STREAK", 0)
+    if abs(hs) >= 3:
+        lines.append(f"{home_tri} are on a {'win' if hs > 0 else 'loss'} streak of {abs(hs)}.")
+    if abs(as_) >= 3:
+        lines.append(f"{away_tri} are on a {'win' if as_ > 0 else 'loss'} streak of {abs(as_)}.")
+
+    # rest
+    hr = feats.get("HOME_REST", 2)
+    ar = feats.get("AWAY_REST", 2)
+    if feats.get("HOME_B2B"):
+        lines.append(f"{home_tri} are on a back-to-back, which may affect performance.")
+    if feats.get("AWAY_B2B"):
+        lines.append(f"{away_tri} are on a back-to-back, which may affect performance.")
+    if hr > ar + 1:
+        lines.append(f"{home_tri} have more rest ({hr} days vs {ar}).")
+    elif ar > hr + 1:
+        lines.append(f"{away_tri} have more rest ({ar} days vs {hr}).")
+
+    # home court
+    hcs = feats.get("HOME_COURT_STRENGTH", 0)
+    if hcs >= 0.1:
+        lines.append(f"{home_tri} have a strong home court advantage.")
+
+    # travel
+    tz = feats.get("AWAY_TRAVEL_TZ_DIFF", 0)
+    if tz >= 2:
+        lines.append(f"{away_tri} are traveling across {int(tz)} time zones.")
+
+    # h2h
+    h2h = feats.get("H2H_HOME_WIN_PCT", 0.5)
+    if h2h >= 0.65:
+        lines.append(f"{home_tri} have dominated this matchup historically ({round(h2h*100)}% H2H win rate).")
+    elif h2h <= 0.35:
+        lines.append(f"{away_tri} have dominated this matchup historically ({round((1-h2h)*100)}% H2H win rate).")
+
+    # injuries
+    for inj, tri in [(home_injuries, home_tri), (away_injuries, away_tri)]:
+        out = [p["name"] for p in inj if p["status"].lower() == "out"]
+        q   = [p["name"] for p in inj if p["status"].lower() in ("questionable", "doubtful")]
+        if out:
+            lines.append(f"{tri} are missing {', '.join(out[:3])} (Out).")
+        if q:
+            lines.append(f"{', '.join(q[:2])} ({tri}) are questionable.")
+
+    return " ".join(lines)
+
+
 
 def fetch_predictions():
     time.sleep(SLEEP)
@@ -391,20 +461,23 @@ def fetch_predictions():
                 for m in ["LogisticRegression", "RandomForest", "GradientBoosting"]
             )
 
-            # track prob history for live games
+            # track prob history for live games — always add point each refresh
             if game_status == 2:
-                ts = datetime.now(timezone.utc).strftime("%H:%M")
+                ts = datetime.now(PST).strftime("%I:%M")
                 if game_id not in _prob_history:
                     _prob_history[game_id] = []
-                hist = _prob_history[game_id]
-                if not hist or hist[-1]["home_prob"] != home_prob:
-                    hist.append({"t": ts, "home_prob": home_prob})
-                    if len(hist) > 100:
-                        hist.pop(0)
+                _prob_history[game_id].append({"t": ts, "home_prob": home_prob})
+                if len(_prob_history[game_id]) > 100:
+                    _prob_history[game_id].pop(0)
 
-            # build scenarios for questionable/doubtful players
-            scenarios = build_scenarios(home_prob, home_id, away_id, injury_report, player_stats) \
-                        if game_status == 1 else []
+            # build scenarios and analysis for pre-game
+            scenarios = []
+            analysis  = ""
+            if game_status == 1:
+                scenarios = build_scenarios(home_prob, home_id, away_id, injury_report, player_stats)
+                analysis  = build_analysis(home_tri, away_tri, feats, home_prob,
+                                           injury_report.get(home_id, []),
+                                           injury_report.get(away_id, []), player_stats)
 
             results.append({
                 "home_tri": home_tri, "away_tri": away_tri,
@@ -427,6 +500,7 @@ def fetch_predictions():
                 "home_injuries":  injury_report.get(home_id, []),
                 "away_injuries":  injury_report.get(away_id, []),
                 "scenarios":      scenarios,
+                "analysis":       analysis,
             })
         except Exception as e:
             results.append({

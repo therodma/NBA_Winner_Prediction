@@ -96,6 +96,9 @@
     .bs-pm-neg{color:var(--red)!important}
     .bs-loading{padding:24px 32px;font-size:.78rem;color:var(--ink-3);font-style:italic}
     .card-error{padding:20px 32px;font-size:.78rem;color:var(--ink-3);font-style:italic}
+    .analysis-wrap{border-top:1px solid var(--border-light);padding:14px 32px;background:var(--bg-card)}
+    .analysis-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+    .analysis-text{font-size:.78rem;color:var(--ink-2);line-height:1.6}
     footer{background:var(--bg-footer);border-top:1px solid var(--border);padding:24px;text-align:center}
     footer p{font-size:.68rem;color:var(--ink-3);line-height:1.7}
     footer strong{font-weight:500;color:var(--ink-2)}
@@ -218,6 +221,12 @@
     const pips = [0,1,2].map(i=>`<div class="pip ${i<agreeCount?'on':''}"></div>`).join('');
     const hB2b = g.home_b2b ? `<div class="b2b-tag">B2B</div>` : '';
     const aB2b = g.away_b2b ? `<div class="b2b-tag">B2B</div>` : '';
+    const analysisSection = g.game_status === 1 && g.analysis ? `
+      <div class="analysis-wrap">
+        <div class="analysis-label">Pre-Game Analysis</div>
+        <div class="analysis-text">${g.analysis}</div>
+      </div>` : '';
+
     const chartSection = g.game_status === 2 ? `
       <div class="chart-wrap">
         <div class="chart-label">${g.home_tri} vs ${g.away_tri} &mdash; win probability</div>
@@ -258,6 +267,7 @@
         <div class="stat-item"><span class="stat-label">Model Consensus <span class="label-hint">(LR &middot; RF &middot; GB)</span></span><div class="pips">${pips}</div></div>
         <div class="stat-item"><span class="stat-label">LR &middot; RF &middot; GB</span><span class="stat-value">${pct(g.prob_lr)} &nbsp;&middot;&nbsp; ${pct(g.prob_rf)} &nbsp;&middot;&nbsp; ${pct(g.prob_gb)}</span></div>
       </div>
+      ${analysisSection}
       ${chartSection}
       ${bsSection}
     </div>`;
