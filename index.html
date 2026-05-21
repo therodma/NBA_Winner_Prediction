@@ -318,7 +318,8 @@
         if (homeScoreEl) homeScoreEl.textContent = data.home_score;
         if (awayScoreEl) awayScoreEl.textContent = data.away_score;
         if (statusEl && data.home_periods && data.home_periods.length > 0) {
-          const lastPeriod = data.home_periods[data.home_periods.length - 1];
+          const periods = data.home_periods.filter(p => p.score > 0 || p.period === 1);
+          const lastPeriod = periods[periods.length - 1];
           statusEl.textContent = `Q${lastPeriod.period}`;
         }
       } catch(e) {}
@@ -337,8 +338,11 @@
         return;
       }
       lbl.textContent = `${data.games.length} Game${data.games.length > 1 ? 's' : ''} Today`;
-      el.innerHTML = `<div class="games">${data.games.map(buildCard).join('')}</div>`;
-      updateCharts(data.games);
+      // only re-render if cards don't exist yet
+      if (!document.querySelector('.card')) {
+        el.innerHTML = `<div class="games">${data.games.map(buildCard).join('')}</div>`;
+        updateCharts(data.games);
+      }
       updateLiveScores(data.games);
     } catch(e) {
       document.getElementById('content').innerHTML = `<div class="state"><p>Could not load predictions.</p></div>`;

@@ -713,8 +713,10 @@
       }
 
       lbl.textContent = data.games.length === 1 ? '1 Game Today' : `${data.games.length} Games Today`;
-      el.innerHTML = `<div class="games">${data.games.map(card).join('')}</div>`;
-      updateCharts(data.games);
+      if (!document.querySelector('.card')) {
+        el.innerHTML = `<div class="games">${data.games.map(card).join('')}</div>`;
+        updateCharts(data.games);
+      }
       updateLiveScores(data.games);
 
     } catch(e) {
