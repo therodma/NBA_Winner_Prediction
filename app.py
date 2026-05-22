@@ -19,7 +19,7 @@ from flask_cors import CORS
 
 from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
 from nba_api.live.nba.endpoints import boxscore as live_boxscore
-from nba_api.stats.endpoints import LeagueDashPlayerStats
+from nba_api.stats.endpoints import LeagueDashPlayerStats, Scoreboard as StatsScoreboard
 
 warnings.filterwarnings("ignore")
 
@@ -416,8 +416,46 @@ def build_analysis(home_tri, away_tri, feats, home_prob, home_injuries, away_inj
 
 def fetch_predictions():
     time.sleep(SLEEP)
-    sb    = live_scoreboard.ScoreBoard()
-    games = sb.get_dict()["scoreboard"]["games"]
+
+    # try live scoreboard first, fall back to stats scoreboard
+    games = []
+    try:
+        sb    = live_scoreboard.ScoreBoard()
+        games = sb.get_dict()["scoreboard"]["games"]
+    except Exception as e:
+        print(f"[scoreboard] live API failed: {e}, trying stats API")
+        try:
+            time.sleep(SLEEP)
+            sb2   = StatsScoreboard(game_date=date.today().strftime("%m/%d/%Y"), timeout=30)
+            df    = sb2.get_data_frames()[0]
+            # convert stats scoreboard format to live format
+            for _, row in df.iterrows():
+                games.append({
+                    "gameId":         str(row.get("GAME_ID", "")),
+                    "gameStatusText": str(row.get("GAME_STATUS_TEXT", "")),
+                    "gameStatus":     1,
+                    "homeTeam": {
+                        "teamId":        int(row.get("HOME_TEAM_ID", 0)),
+                        "teamTricode":   str(row.get("HOME_TEAM_ABBREVIATION", "")),
+                        "teamCity":      str(row.get("HOME_TEAM_CITY", "")),
+                        "teamName":      str(row.get("HOME_TEAM_NAME", "")),
+                        "wins":          int(row.get("HOME_TEAM_WINS", 0)),
+                        "losses":        int(row.get("HOME_TEAM_LOSSES", 0)),
+                        "score":         0,
+                    },
+                    "awayTeam": {
+                        "teamId":        int(row.get("VISITOR_TEAM_ID", 0)),
+                        "teamTricode":   str(row.get("VISITOR_TEAM_ABBREVIATION", "")),
+                        "teamCity":      str(row.get("VISITOR_TEAM_CITY", "")),
+                        "teamName":      str(row.get("VISITOR_TEAM_NAME", "")),
+                        "wins":          int(row.get("VISITOR_TEAM_WINS", 0)),
+                        "losses":        int(row.get("VISITOR_TEAM_LOSSES", 0)),
+                        "score":         0,
+                    },
+                })
+        except Exception as e2:
+            print(f"[scoreboard] stats API also failed: {e2}")
+
     injury_report = get_injury_report()
     player_stats  = get_player_stats()
     results = []
