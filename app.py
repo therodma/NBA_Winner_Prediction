@@ -80,7 +80,7 @@ TEAM_TIMEZONE = {
 
 # ── in-memory cache ───────────────────────────────────────────────────────────
 
-_cache      = {"data": None, "updated": None}
+_cache      = {"data": None, "updated": None, "date": None}
 _cache_lock = threading.Lock()
 _prob_history = {}  # {game_id: [{t, home_prob}]}
 
@@ -535,18 +535,18 @@ def fetch_predictions():
     return results
 
 def refresh_cache():
+def refresh_cache():
     try:
         results = fetch_predictions()
-        updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST")
-        with _cache_lock:
-            _cache["data"]    = results
-            _cache["updated"] = updated
-        print(f"[cache] refreshed at {updated}")
-    except Exception as e:
-        print(f"[cache] refresh error: {e}")
-
-# ── start scheduler (runs on Render + locally) ───────────────────────────────
-
+        updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST)
+ today = date.today().isoformat()
+ with _cache_lock:
+ if _cache[date] != today:
+ _prob_history.clear()
+ _cache[data] = results
+ _cache[updated] = updated
+ _cache[date] = today
+ print(f[cache] refreshed at {updated})
 _scheduler = BackgroundScheduler()
 _scheduler.add_job(refresh_cache, "interval", seconds=60)
 _scheduler.add_job(refresh_cache, "cron", hour=0, minute=5)
