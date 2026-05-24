@@ -19,7 +19,7 @@ from flask_cors import CORS
 
 from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
 from nba_api.live.nba.endpoints import boxscore as live_boxscore
-from nba_api.stats.endpoints import LeagueDashPlayerStats, ScoreboardV3
+from nba_api.stats.endpoints import LeagueDashPlayerStats, ScoreboardV3, BoxScoreTraditionalV3
 
 warnings.filterwarnings("ignore")
 
@@ -177,29 +177,33 @@ def build_features(home_id, away_id, home_tri="", away_tri=""):
 # ── box score helpers ─────────────────────────────────────────────────────────
 
 def parse_minutes(raw):
+    if not raw or raw == "PT" or raw == "":
+        return "0:00"
     m = raw.replace("PT", "").replace("M", ":").split(":")[0:2]
     return ":".join(m) if len(m) == 2 else raw
 
-def parse_players(team_data):
+def parse_players_v3(team_data):
     players = []
-    for p in team_data["players"]:
-        if p["played"] != "1":
-            continue
-        s = p["statistics"]
+    for p in team_data.get("players", []):
+        s = p.get("statistics", {})
+        pts = s.get("points", 0)
+        mins = s.get("minutes", "")
+        if not mins and pts == 0:
+            continue  # didn't play
         players.append({
-            "name":    p["name"],
-            "starter": p["starter"] == "1",
-            "min":     parse_minutes(s.get("minutesCalculated", "PT0M")),
-            "pts":     s["points"],
-            "reb":     s["reboundsTotal"],
-            "ast":     s["assists"],
-            "stl":     s["steals"],
-            "blk":     s["blocks"],
-            "tov":     s["turnovers"],
-            "fg":      f"{s['fieldGoalsMade']}/{s['fieldGoalsAttempted']}",
-            "3p":      f"{s['threePointersMade']}/{s['threePointersAttempted']}",
-            "ft":      f"{s['freeThrowsMade']}/{s['freeThrowsAttempted']}",
-            "pm":      int(s["plusMinusPoints"]),
+            "name":    f"{p.get('firstName','')} {p.get('familyName','')}".strip(),
+            "starter": p.get("position", "") != "",
+            "min":     parse_minutes(mins),
+            "pts":     pts,
+            "reb":     s.get("reboundsTotal", 0),
+            "ast":     s.get("assists", 0),
+            "stl":     s.get("steals", 0),
+            "blk":     s.get("blocks", 0),
+            "tov":     s.get("turnovers", 0),
+            "fg":      f"{s.get('fieldGoalsMade',0)}/{s.get('fieldGoalsAttempted',0)}",
+            "3p":      f"{s.get('threePointersMade',0)}/{s.get('threePointersAttempted',0)}",
+            "ft":      f"{s.get('freeThrowsMade',0)}/{s.get('freeThrowsAttempted',0)}",
+            "pm":      int(s.get("plusMinusPoints", 0)),
         })
     players.sort(key=lambda x: (-x["pts"], not x["starter"]))
     return players
