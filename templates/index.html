@@ -724,24 +724,19 @@
     }
   }
 
-  /* ── live score updater ── */
   async function updateLiveScores(games) {
-    for (const g of games) {
-      if (g.game_status !== 2) continue;
-      try {
-        const data = await fetch(`/api/boxscore/${g.game_id}`).then(r => r.json());
-        if (data.error) continue;
-        const homeScoreEl = document.getElementById(`home-score-${g.game_id}`);
-        const awayScoreEl = document.getElementById(`away-score-${g.game_id}`);
-        const statusEl    = document.getElementById(`status-${g.game_id}`);
-        if (homeScoreEl) homeScoreEl.textContent = data.home_score;
-        if (awayScoreEl) awayScoreEl.textContent = data.away_score;
-        if (statusEl && data.home_periods && data.home_periods.length > 0) {
-          const lastPeriod = data.home_periods[data.home_periods.length - 1];
-          statusEl.textContent = `Q${lastPeriod.period}`;
-        }
-      } catch(e) {}
-    }
+    games.forEach(g => {
+      if (g.game_status !== 2) return;
+      const homeScoreEl = document.getElementById(`home-score-${g.game_id}`);
+      const awayScoreEl = document.getElementById(`away-score-${g.game_id}`);
+      const statusEl    = document.getElementById(`status-${g.game_id}`);
+      if (homeScoreEl) homeScoreEl.textContent = g.home_score;
+      if (awayScoreEl) awayScoreEl.textContent = g.away_score;
+      if (statusEl && g.period) {
+        const clock = g.game_clock ? g.game_clock.replace('PT','').replace(/M.*/,' min') : '';
+        statusEl.textContent = `Q${g.period}${clock ? ' ' + clock : ''}`;
+      }
+    });
   }
 
   /* ── sparkline chart ── */

@@ -452,6 +452,8 @@ def fetch_predictions():
         home_score  = g["homeTeam"]["score"]
         away_score  = g["awayTeam"]["score"]
         game_id     = g["gameId"]
+        period      = g.get("period", 0)
+        game_clock  = g.get("gameClock", "")
         try:
             feats = build_features(home_id, away_id, home_tri, away_tri)
             X = pd.DataFrame([feats], columns=FEATURE_COLS).values
@@ -503,7 +505,7 @@ def fetch_predictions():
                 "status": status, "game_status": game_status,
                 "game_id": game_id,
                 "home_id": home_id, "away_id": away_id,
-                "home_score": home_score, "away_score": away_score,
+                "home_score": home_score, "away_score": away_score, "period": period, "game_clock": game_clock,
                 "home_prob": home_prob, "away_prob": away_prob,
                 "pred_winner": pred_winner,
                 "margin": round(margin, 1),
@@ -527,7 +529,7 @@ def fetch_predictions():
                 "status": status, "game_status": game_status,
                 "game_id": game_id,
                 "home_id": home_id, "away_id": away_id,
-                "home_score": home_score, "away_score": away_score,
+                "home_score": home_score, "away_score": away_score, "period": period, "game_clock": game_clock,
                 "error": str(e),
             })
     return results
