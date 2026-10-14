@@ -535,18 +535,26 @@ def fetch_predictions():
     return results
 
 def refresh_cache():
-def refresh_cache():
     try:
+        today_str = date.today().isoformat()
+        with _cache_lock:
+            if _cache["date"] != today_str:
+                _cache["data"] = None
+                _cache["date"] = today_str
+                _prob_history.clear()
+                print(f"[cache] new day {today_str} — cleared stale games")
         results = fetch_predictions()
-        updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST)
- today = date.today().isoformat()
- with _cache_lock:
- if _cache[date] != today:
- _prob_history.clear()
- _cache[data] = results
- _cache[updated] = updated
- _cache[date] = today
- print(f[cache] refreshed at {updated})
+        updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST")
+        with _cache_lock:
+            _cache["data"]    = results
+            _cache["updated"] = updated
+            _cache["date"]    = today_str
+        print(f"[cache] refreshed at {updated}")
+    except Exception as e:
+        print(f"[cache] refresh error: {e}")
+
+# ── start scheduler (runs on Render + locally) ───────────────────────────────
+
 _scheduler = BackgroundScheduler()
 _scheduler.add_job(refresh_cache, "interval", seconds=60)
 _scheduler.add_job(refresh_cache, "cron", hour=0, minute=5)

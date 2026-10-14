@@ -418,6 +418,25 @@
     .analysis-wrap { border-top: 1px solid var(--border-light); padding: 14px 32px; background: var(--bg-card); }
     .analysis-label { font-size: 0.58rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
     .analysis-text { font-size: 0.78rem; color: var(--ink-2); line-height: 1.6; }
+    .injury-wrap { border-top: 1px solid var(--border-light); padding: 12px 32px; background: var(--bg-card); display: flex; gap: 32px; }
+    .injury-col { flex: 1; }
+    .injury-team { font-size: 0.58rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+    .injury-list { display: flex; flex-direction: column; gap: 4px; }
+    .injury-player { display: flex; align-items: center; gap: 7px; font-size: 0.75rem; color: var(--ink-2); }
+    .inj-badge { font-size: 0.55rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; padding: 1px 5px; border-radius: 2px; white-space: nowrap; }
+    .inj-out { background: #f5ece9; color: var(--red); }
+    .inj-doubtful { background: #fdf3e7; color: #8a5a1a; }
+    .inj-questionable { background: #f5f5e9; color: #6b6b1a; }
+    .inj-reason { font-size: 0.68rem; color: var(--ink-3); }
+    .scenarios-wrap { border-top: 1px solid var(--border-light); padding: 12px 32px; background: var(--bg-card); }
+    .scenarios-label { font-size: 0.58rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px; }
+    .scenario-row { display: flex; align-items: center; gap: 10px; font-size: 0.75rem; color: var(--ink-2); padding: 4px 0; border-bottom: 1px solid var(--border-light); }
+    .scenario-row:last-child { border-bottom: none; }
+    .scenario-player { flex: 1; font-weight: 400; color: var(--ink); }
+    .scenario-team { font-size: 0.65rem; color: var(--ink-3); }
+    .scenario-probs { display: flex; gap: 14px; font-size: 0.72rem; }
+    .scenario-plays { color: var(--green); }
+    .scenario-sits { color: var(--red); }
 
     /* ── footer ── */
     footer {
@@ -687,6 +706,36 @@
       ${g.game_status === 1 && g.analysis ? `<div class="analysis-wrap">
         <div class="analysis-label">Pre-Game Analysis</div>
         <div class="analysis-text">${g.analysis}</div>
+      </div>` : ''}
+
+      ${(() => {
+        if (g.game_status !== 1) return '';
+        function injBadge(s) {
+          const cls = s==='Out'?'inj-out':s==='Doubtful'?'inj-doubtful':'inj-questionable';
+          return `<span class="inj-badge ${cls}">${s}</span>`;
+        }
+        function injCol(tri, injuries) {
+          if (!injuries || injuries.length === 0) return '';
+          const rows = injuries.map(p =>
+            `<div class="injury-player">${injBadge(p.status)}<span>${p.name}</span>${p.reason?`<span class="inj-reason">${p.reason}</span>`:''}</div>`
+          ).join('');
+          return `<div class="injury-col"><div class="injury-team">${tri}</div><div class="injury-list">${rows}</div></div>`;
+        }
+        const hc = injCol(g.home_tri, g.home_injuries);
+        const ac = injCol(g.away_tri, g.away_injuries);
+        return (hc || ac) ? `<div class="injury-wrap">${hc}${ac}</div>` : '';
+      })()}
+
+      ${g.game_status === 1 && g.scenarios && g.scenarios.length ? `<div class="scenarios-wrap">
+        <div class="scenarios-label">Questionable Player Scenarios</div>
+        ${g.scenarios.map(s => `
+          <div class="scenario-row">
+            <span class="scenario-player">${s.player} <span class="scenario-team">(${s.team === 'home' ? g.home_tri : g.away_tri})</span></span>
+            <span class="scenario-probs">
+              <span class="scenario-plays">Plays: ${Math.round(s.plays_home_prob*100)}% ${g.home_tri}</span>
+              <span class="scenario-sits">Sits: ${Math.round(s.sits_home_prob*100)}% ${g.home_tri}</span>
+            </span>
+          </div>`).join('')}
       </div>` : ''}
 
       ${boxScoreSection}
