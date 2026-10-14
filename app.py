@@ -35,6 +35,8 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GIST_FILE    = "history.json"
 GIST_HEADERS = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
 
+HISTORY_FILE = Path("data/history.json")
+
 FEATURE_COLS = [
     "DIFF_OFF_RATING", "DIFF_DEF_RATING", "DIFF_NET_RATING", "DIFF_PACE",
     "DIFF_W_PCT", "DIFF_FG_PCT", "DIFF_FG3_PCT", "DIFF_FT_PCT",
@@ -173,6 +175,160 @@ def build_features(home_id, away_id, home_tri="", away_tri=""):
         "AWAY_TRAVEL_TZ_DIFF": tz_diff,
         "H2H_HOME_WIN_PCT": h2h,
     }
+
+# ── feature importance / explainability ──────────────────────────────────────
+
+# Pre-compute RF feature importances once at startup
+_RF_IMPORTANCES = None
+try:
+    _rf = MODELS["RandomForest"]
+    # Pipeline wraps the classifier; get the actual estimator
+    _clf = _rf.named_steps["clf"] if hasattr(_rf, "named_steps") else _rf
+    if hasattr(_clf, "feature_importances_"):
+        _RF_IMPORTANCES = dict(zip(FEATURE_COLS, _clf.feature_importances_))
+except Exception as _e:
+    print(f"[importance] could not load RF importances: {_e}")
+
+# Human-readable labels for features
+_FEAT_LABELS = {
+    "DIFF_NET_RATING":      "Net Rating edge",
+    "DIFF_OFF_RATING":      "Offensive Rating edge",
+    "DIFF_DEF_RATING":      "Defensive Rating edge",
+    "DIFF_W_PCT":           "Win % edge",
+    "DIFF_ROLL10_WIN_PCT":  "Last-10 form edge",
+    "DIFF_ROLL10_PM":       "Last-10 point diff edge",
+    "DIFF_ROLL20_WIN_PCT":  "Last-20 form edge",
+    "DIFF_ROLL20_PM":       "Last-20 point diff edge",
+    "DIFF_STREAK":          "Streak edge",
+    "DIFF_REST":            "Rest days edge",
+    "HOME_B2B":             "Home team on B2B",
+    "AWAY_B2B":             "Away team on B2B",
+    "DIFF_COURT_STRENGTH":  "Home court strength",
+    "AWAY_TRAVEL_TZ_DIFF":  "Away travel timezone gap",
+    "H2H_HOME_WIN_PCT":     "Head-to-head history",
+    "DIFF_TS_PCT":          "True shooting % edge",
+    "DIFF_AST_PCT":         "Assist % edge",
+    "DIFF_TM_TOV_PCT":      "Turnover % edge",
+}
+
+def build_top_factors(feats: dict, home_tri: str, away_tri: str, home_prob: float) -> list:
+    """Return top 3 most influential factors for this prediction."""
+    if not _RF_IMPORTANCES:
+        return []
+    home_favored = home_prob >= 0.5
+    fav = home_tri if home_favored else away_tri
+    dog = away_tri if home_favored else home_tri
+
+    scored = []
+    for feat, importance in _RF_IMPORTANCES.items():
+        val = feats.get(feat, 0.0)
+        if abs(val) < 1e-6 and feat not in ("HOME_B2B", "AWAY_B2B"):
+            continue
+        label = _FEAT_LABELS.get(feat, feat)
+        # Determine direction: positive diff = home advantage
+        if feat == "HOME_B2B":
+            if val:
+                desc = f"{home_tri} on back-to-back (fatigue risk)"
+            else:
+                continue
+        elif feat == "AWAY_B2B":
+            if val:
+                desc = f"{away_tri} on back-to-back (fatigue risk)"
+            else:
+                continue
+        elif feat == "AWAY_TRAVEL_TZ_DIFF":
+            if val >= 2:
+                desc = f"{away_tri} traveling {int(val)} time zones"
+            else:
+                continue
+        elif feat == "H2H_HOME_WIN_PCT":
+            if val >= 0.6:
+                desc = f"{home_tri} leads H2H ({round(val*100)}%)"
+            elif val <= 0.4:
+                desc = f"{away_tri} leads H2H ({round((1-val)*100)}%)"
+            else:
+                continue
+        else:
+            # diff features: positive = home advantage
+            if val > 0:
+                desc = f"{home_tri} {label} (+{val:.1f})"
+            else:
+                desc = f"{away_tri} {label} ({val:.1f})"
+        scored.append((importance * abs(val if feat not in ("HOME_B2B","AWAY_B2B","H2H_HOME_WIN_PCT") else 1), desc))
+
+    scored.sort(reverse=True)
+    return [desc for _, desc in scored[:3]]
+
+
+# ── history / accuracy tracking ───────────────────────────────────────────────
+
+def _load_history_file() -> dict:
+    try:
+        if HISTORY_FILE.exists():
+            return json.loads(HISTORY_FILE.read_text())
+    except Exception as e:
+        print(f"[history] load error: {e}")
+    return {}
+
+def _save_history_file(data: dict):
+    try:
+        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HISTORY_FILE.write_text(json.dumps(data))
+    except Exception as e:
+        print(f"[history] save error: {e}")
+
+def record_final_games(games: list):
+    """Called after each cache refresh — persist any newly-final games."""
+    final = [g for g in games if g.get("game_status") == 3 and "pred_winner" in g]
+    if not final:
+        return
+    today_str = date.today().isoformat()
+    history = _load_history_file()
+    existing = {g["game_id"] for day in history.values() for g in day}
+    new_games = [g for g in final if g["game_id"] not in existing]
+    if not new_games:
+        return
+    if today_str not in history:
+        history[today_str] = []
+    for g in new_games:
+        history[today_str].append({
+            "game_id":    g["game_id"],
+            "home_tri":   g["home_tri"],
+            "away_tri":   g["away_tri"],
+            "home_score": g["home_score"],
+            "away_score": g["away_score"],
+            "pred_winner":g["pred_winner"],
+            "home_prob":  g["home_prob"],
+        })
+    _save_history_file(history)
+    print(f"[history] saved {len(new_games)} final game(s) for {today_str}")
+
+def compute_accuracy() -> dict:
+    """Return season-to-date correct/total/pct from history file."""
+    history = _load_history_file()
+    correct = total = 0
+    recent = []
+    for day_str in sorted(history.keys(), reverse=True):
+        for g in history[day_str]:
+            total += 1
+            home_won = g["home_score"] > g["away_score"]
+            pred_correct = (home_won and g["pred_winner"] == g["home_tri"]) or \
+                           (not home_won and g["pred_winner"] == g["away_tri"])
+            if pred_correct:
+                correct += 1
+            if len(recent) < 20:
+                recent.append({
+                    "date":       day_str,
+                    "home_tri":   g["home_tri"],
+                    "away_tri":   g["away_tri"],
+                    "home_score": g["home_score"],
+                    "away_score": g["away_score"],
+                    "pred_winner":g["pred_winner"],
+                    "correct":    pred_correct,
+                })
+    pct = round(correct / total * 100, 1) if total else None
+    return {"correct": correct, "total": total, "pct": pct, "recent": recent}
+
 
 # ── box score helpers ─────────────────────────────────────────────────────────
 
@@ -489,14 +645,16 @@ def fetch_predictions():
                 if len(_prob_history[game_id]) > 100:
                     _prob_history[game_id].pop(0)
 
-            # build scenarios and analysis for pre-game
-            scenarios = []
-            analysis  = ""
+            # build scenarios, analysis, and top factors for pre-game
+            scenarios    = []
+            analysis     = ""
+            top_factors  = []
             if game_status == 1:
-                scenarios = build_scenarios(home_prob, home_id, away_id, injury_report, player_stats)
-                analysis  = build_analysis(home_tri, away_tri, feats, home_prob,
-                                           injury_report.get(home_id, []),
-                                           injury_report.get(away_id, []), player_stats)
+                scenarios   = build_scenarios(home_prob, home_id, away_id, injury_report, player_stats)
+                analysis    = build_analysis(home_tri, away_tri, feats, home_prob,
+                                             injury_report.get(home_id, []),
+                                             injury_report.get(away_id, []), player_stats)
+                top_factors = build_top_factors(feats, home_tri, away_tri, home_prob)
 
             results.append({
                 "home_tri": home_tri, "away_tri": away_tri,
@@ -520,6 +678,7 @@ def fetch_predictions():
                 "away_injuries":  injury_report.get(away_id, []),
                 "scenarios":      scenarios,
                 "analysis":       analysis,
+                "top_factors":    top_factors,
             })
         except Exception as e:
             results.append({
@@ -549,6 +708,7 @@ def refresh_cache():
             _cache["data"]    = results
             _cache["updated"] = updated
             _cache["date"]    = today_str
+        record_final_games(results)
         print(f"[cache] refreshed at {updated}")
     except Exception as e:
         print(f"[cache] refresh error: {e}")
@@ -610,6 +770,10 @@ def predictions():
         except Exception as e:
             return jsonify({"error": str(e), "games": []})
     return jsonify({"games": data, "date": date.today().isoformat(), "updated": updated})
+
+@app.route("/api/accuracy")
+def accuracy():
+    return jsonify(compute_accuracy())
 
 @app.route("/api/yesterday")
 def yesterday():

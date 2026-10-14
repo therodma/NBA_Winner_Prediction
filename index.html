@@ -118,6 +118,16 @@
     .scenario-probs{display:flex;gap:14px;font-size:.72rem}
     .scenario-plays{color:var(--green)}
     .scenario-sits{color:var(--red)}
+    .factors-wrap{border-top:1px solid var(--border-light);padding:10px 32px;background:var(--bg-card);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .factors-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-right:2px;white-space:nowrap}
+    .factor-chip{font-size:.68rem;color:var(--ink-2);background:var(--bg);border:1px solid var(--border-light);border-radius:99px;padding:3px 10px}
+    .recent-wrap{margin-top:32px}
+    .recent-table{width:100%;border-collapse:collapse;font-size:.75rem}
+    .recent-table th{font-size:.58rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);text-align:left;padding:0 8px 8px 0;border-bottom:1px solid var(--border-light)}
+    .recent-table td{padding:7px 8px 7px 0;color:var(--ink-2);border-bottom:1px solid var(--border-light)}
+    .recent-table tr:last-child td{border-bottom:none}
+    .rc{color:var(--green);font-weight:500}
+    .rw{color:var(--red)}
     footer{background:var(--bg-footer);border-top:1px solid var(--border);padding:24px;text-align:center}
     footer p{font-size:.68rem;color:var(--ink-3);line-height:1.7}
     footer strong{font-weight:500;color:var(--ink-2)}
@@ -130,17 +140,19 @@
       .card-stats{padding:12px 16px;flex-wrap:wrap;gap:12px}
       .stat-item{flex:none;width:calc(50% - 6px);border-right:none!important;margin-right:0!important;padding-right:0}
       .bs-team-section{padding:16px}.toggle-btn{padding:11px 16px}
+      .injury-wrap{flex-direction:column;gap:16px}
+      .factors-wrap{padding:10px 16px}
     }
   </style>
 </head>
 <body>
 <header>
-  <div class="header-eyebrow">Machine Learning · <span id="today-date"></span></div>
+  <div class="header-eyebrow">Machine Learning &middot; <span id="today-date"></span></div>
   <h1>NBA Game Predictions</h1>
   <div class="header-sub">
     <span id="updated-time">Loading&hellip;</span>
     <span class="sep">|</span>
-    <span>71% accuracy &middot; 2025&ndash;26 season</span>
+    <span id="accuracy-display">71% accuracy &middot; 2025&ndash;26 season</span>
     <span class="sep">|</span>
     <span>Refreshes every 10s</span>
   </div>
@@ -148,10 +160,11 @@
 <main>
   <div class="section-label" id="games-label">Today's Games</div>
   <div id="content"><div class="state"><div class="spinner"></div><p>Fetching today's games&hellip;</p></div></div>
+  <div id="recent-section"></div>
 </main>
 <footer>
-  <p><strong>Ensemble model</strong> &mdash; Logistic Regression · Random Forest · Gradient Boosting<br>
-  Features: season ratings, rolling 10-game form, rest days, H2H record · Not a betting service</p>
+  <p><strong>Ensemble model</strong> &mdash; Logistic Regression &middot; Random Forest &middot; Gradient Boosting<br>
+  Features: season ratings, rolling form, rest days, H2H record &middot; Not a betting service</p>
 </footer>
 <script>
   const API = 'https://nba-winner-prediction.onrender.com';
@@ -202,6 +215,18 @@
     if (!isOpen && !panel.dataset.loaded) { panel.dataset.loaded='1'; loadBoxScore(btn.dataset.gameId, panel); }
   });
 
+  function injBadge(s) {
+    const cls = s==='Out'?'inj-out':s==='Doubtful'?'inj-doubtful':'inj-questionable';
+    return `<span class="inj-badge ${cls}">${s}</span>`;
+  }
+  function injCol(tri, injuries) {
+    if (!injuries || injuries.length === 0) return '';
+    const rows = injuries.map(p =>
+      `<div class="injury-player">${injBadge(p.status)}<span>${p.name}</span>${p.reason?`<span class="inj-reason">${p.reason}</span>`:''}</div>`
+    ).join('');
+    return `<div class="injury-col"><div class="injury-team">${tri}</div><div class="injury-list">${rows}</div></div>`;
+  }
+
   function buildCard(g) {
     const hc = COLORS[g.home_tri] || '#1c1917';
     const ac = COLORS[g.away_tri] || '#1c1917';
@@ -240,50 +265,33 @@
     const pips = [0,1,2].map(i=>`<div class="pip ${i<agreeCount?'on':''}"></div>`).join('');
     const hB2b = g.home_b2b ? `<div class="b2b-tag">B2B</div>` : '';
     const aB2b = g.away_b2b ? `<div class="b2b-tag">B2B</div>` : '';
-    const analysisSection = g.game_status === 1 && g.analysis ? `
-      <div class="analysis-wrap">
-        <div class="analysis-label">Pre-Game Analysis</div>
-        <div class="analysis-text">${g.analysis}</div>
-      </div>` : '';
 
-    function injBadge(s) {
-      const cls = s==='Out'?'inj-out':s==='Doubtful'?'inj-doubtful':'inj-questionable';
-      return `<span class="inj-badge ${cls}">${s}</span>`;
-    }
-    function injCol(tri, injuries) {
-      if (!injuries || injuries.length === 0) return '';
-      const rows = injuries.map(p =>
-        `<div class="injury-player">${injBadge(p.status)}<span>${p.name}</span>${p.reason?`<span class="inj-reason">${p.reason}</span>`:''}</div>`
-      ).join('');
-      return `<div class="injury-col"><div class="injury-team">${tri}</div><div class="injury-list">${rows}</div></div>`;
-    }
+    const analysisSection = g.game_status === 1 && g.analysis
+      ? `<div class="analysis-wrap"><div class="analysis-label">Pre-Game Analysis</div><div class="analysis-text">${g.analysis}</div></div>` : '';
+
     const homeInjCol = injCol(g.home_tri, g.home_injuries);
     const awayInjCol = injCol(g.away_tri, g.away_injuries);
-    const injurySection = g.game_status === 1 && (homeInjCol || awayInjCol) ? `
-      <div class="injury-wrap">${homeInjCol}${awayInjCol}</div>` : '';
+    const injurySection = g.game_status === 1 && (homeInjCol || awayInjCol)
+      ? `<div class="injury-wrap">${homeInjCol}${awayInjCol}</div>` : '';
 
-    const scenariosSection = g.game_status === 1 && g.scenarios && g.scenarios.length ? `
-      <div class="scenarios-wrap">
-        <div class="scenarios-label">Questionable Player Scenarios</div>
-        ${g.scenarios.map(s => `
-          <div class="scenario-row">
-            <span class="scenario-player">${s.player} <span class="scenario-team">(${s.team === 'home' ? g.home_tri : g.away_tri})</span></span>
+    const scenariosSection = g.game_status === 1 && g.scenarios && g.scenarios.length
+      ? `<div class="scenarios-wrap"><div class="scenarios-label">Questionable Player Scenarios</div>${g.scenarios.map(s =>
+          `<div class="scenario-row">
+            <span class="scenario-player">${s.player} <span class="scenario-team">(${s.team==='home'?g.home_tri:g.away_tri})</span></span>
             <span class="scenario-probs">
               <span class="scenario-plays">Plays: ${Math.round(s.plays_home_prob*100)}% ${g.home_tri}</span>
               <span class="scenario-sits">Sits: ${Math.round(s.sits_home_prob*100)}% ${g.home_tri}</span>
             </span>
-          </div>`).join('')}
-      </div>` : '';
+          </div>`).join('')}</div>` : '';
 
-    const chartSection = g.game_status === 2 ? `
-      <div class="chart-wrap">
-        <div class="chart-label">${g.home_tri} vs ${g.away_tri} &mdash; win probability</div>
-        <canvas id="chart-${g.game_id}" class="sparkline" width="756" height="56"></canvas>
-      </div>` : '';
-    const bsSection = g.game_status >= 2 ? `
-      <div class="boxscore-toggle">
-        <button class="toggle-btn" data-game-id="${g.game_id}">Box Score <span class="toggle-icon">&#9660;</span></button>
-      </div><div class="boxscore-panel"></div>` : '';
+    const factorsSection = g.game_status === 1 && g.top_factors && g.top_factors.length
+      ? `<div class="factors-wrap"><span class="factors-label">Key Factors</span>${g.top_factors.map(f=>`<span class="factor-chip">${f}</span>`).join('')}</div>` : '';
+
+    const chartSection = g.game_status === 2
+      ? `<div class="chart-wrap"><div class="chart-label">${g.home_tri} vs ${g.away_tri} &mdash; win probability</div><canvas id="chart-${g.game_id}" class="sparkline" width="756" height="56"></canvas></div>` : '';
+
+    const bsSection = g.game_status >= 2
+      ? `<div class="boxscore-toggle"><button class="toggle-btn" data-game-id="${g.game_id}">Box Score <span class="toggle-icon">&#9660;</span></button></div><div class="boxscore-panel"></div>` : '';
 
     return `<div class="card">
       <div class="matchup">
@@ -315,6 +323,7 @@
         <div class="stat-item"><span class="stat-label">Model Consensus <span class="label-hint">(LR &middot; RF &middot; GB)</span></span><div class="pips">${pips}</div></div>
         <div class="stat-item"><span class="stat-label">LR &middot; RF &middot; GB</span><span class="stat-value">${pct(g.prob_lr)} &nbsp;&middot;&nbsp; ${pct(g.prob_rf)} &nbsp;&middot;&nbsp; ${pct(g.prob_gb)}</span></div>
       </div>
+      ${factorsSection}
       ${analysisSection}
       ${injurySection}
       ${scenariosSection}
@@ -325,9 +334,7 @@
 
   function drawSparkline(canvas, history, homeColor) {
     if (!history || history.length < 1) { canvas.style.display='none'; return; }
-    if (history.length === 1) {
-      history = [history[0], history[0]];
-    }
+    if (history.length === 1) history = [history[0], history[0]];
     canvas.style.display = 'block';
     const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
     ctx.clearRect(0,0,W,H);
@@ -355,8 +362,7 @@
     });
   }
 
-  /* ── live score updater ── */
-  async function updateLiveScores(games) {
+  function updateLiveScores(games) {
     games.forEach(g => {
       if (g.game_status !== 2) return;
       const homeScoreEl = document.getElementById(`home-score-${g.game_id}`);
@@ -371,6 +377,40 @@
     });
   }
 
+  async function loadAccuracy() {
+    try {
+      const data = await fetch(`${API}/api/accuracy`).then(r => r.json());
+      if (data.total > 0) {
+        document.getElementById('accuracy-display').textContent =
+          `${data.pct}% accuracy this season (${data.correct}/${data.total})`;
+      }
+      if (data.recent && data.recent.length > 0) {
+        const rows = data.recent.map(g => {
+          const homeWon = g.home_score > g.away_score;
+          const winner = homeWon ? g.home_tri : g.away_tri;
+          const loser  = homeWon ? g.away_tri : g.home_tri;
+          const ws = homeWon ? g.home_score : g.away_score;
+          const ls = homeWon ? g.away_score : g.home_score;
+          return `<tr>
+            <td>${g.date}</td>
+            <td>${g.home_tri} vs ${g.away_tri}</td>
+            <td>${winner} ${ws}–${ls}</td>
+            <td>${g.pred_winner}</td>
+            <td class="${g.correct?'rc':'rw'}">${g.correct?'✓':'✗'}</td>
+          </tr>`;
+        }).join('');
+        document.getElementById('recent-section').innerHTML = `
+          <div class="recent-wrap">
+            <div class="section-label">Recent Results</div>
+            <table class="recent-table">
+              <thead><tr><th>Date</th><th>Matchup</th><th>Result</th><th>Pick</th><th>Correct</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }
+    } catch(e) {}
+  }
+
   async function load() {
     try {
       const data = await fetch(`${API}/api/predictions`).then(r => r.json());
@@ -383,7 +423,6 @@
         return;
       }
       lbl.textContent = `${data.games.length} Game${data.games.length > 1 ? 's' : ''} Today`;
-      // only re-render if cards don't exist yet
       if (!document.querySelector('.card')) {
         el.innerHTML = `<div class="games">${data.games.map(buildCard).join('')}</div>`;
         updateCharts(data.games);
@@ -395,7 +434,9 @@
   }
 
   load();
+  loadAccuracy();
   setInterval(load, 10 * 1000);
+  setInterval(loadAccuracy, 5 * 60 * 1000);
 </script>
 </body>
 </html>
