@@ -128,6 +128,18 @@
     .recent-table tr:last-child td{border-bottom:none}
     .rc{color:var(--green);font-weight:500}
     .rw{color:var(--red)}
+    .conf-label{font-size:.6rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;padding:2px 8px;border-radius:2px;margin-left:6px}
+    .conf-tossup{background:#f5f5f0;color:var(--ink-3)}
+    .conf-lean{background:#eef3f0;color:#5a7a65}
+    .conf-likely{background:#e4ede8;color:var(--green)}
+    .conf-strong{background:#d4e6db;color:#2d5240}
+    .schedule-wrap{margin-top:32px}
+    .schedule-day{margin-bottom:20px}
+    .schedule-date{font-size:.62rem;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+    .schedule-game{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-light);font-size:.78rem;color:var(--ink-2)}
+    .schedule-game:last-child{border-bottom:none}
+    .schedule-tri{font-family:'Playfair Display',serif;font-size:.95rem;font-weight:500;color:var(--ink)}
+    .schedule-time{font-size:.68rem;color:var(--ink-3);margin-left:auto}
     footer{background:var(--bg-footer);border-top:1px solid var(--border);padding:24px;text-align:center}
     footer p{font-size:.68rem;color:var(--ink-3);line-height:1.7}
     footer strong{font-weight:500;color:var(--ink-2)}
@@ -161,6 +173,7 @@
   <div class="section-label" id="games-label">Today's Games</div>
   <div id="content"><div class="state"><div class="spinner"></div><p>Fetching today's games&hellip;</p></div></div>
   <div id="recent-section"></div>
+  <div id="schedule-section"></div>
 </main>
 <footer>
   <p><strong>Ensemble model</strong> &mdash; Logistic Regression &middot; Random Forest &middot; Gradient Boosting<br>
@@ -176,6 +189,19 @@
     SAC:'#5A2D81',SAS:'#8A8D8F',TOR:'#CE1141',UTA:'#002B5C',WAS:'#002B5C',
   };
   const pct = p => Math.round(p * 100) + '%';
+
+  function confLabel(prob) {
+    const p = Math.max(prob, 1 - prob);
+    if (p >= 0.72) return '<span class="conf-label conf-strong">Strong</span>';
+    if (p >= 0.62) return '<span class="conf-label conf-likely">Likely</span>';
+    if (p >= 0.55) return '<span class="conf-label conf-lean">Lean</span>';
+    return '<span class="conf-label conf-tossup">Toss-up</span>';
+  }
+
+  function sortGames(games) {
+    const order = {2: 0, 1: 1, 3: 2};
+    return [...games].sort((a, b) => (order[a.game_status]??1) - (order[b.game_status]??1));
+  }
 
   async function loadBoxScore(gameId, panelEl) {
     panelEl.innerHTML = '<div class="bs-loading">Loading box score&hellip;</div>';
@@ -308,7 +334,7 @@
       <div class="prob-row">
         <div class="prob-numbers">
           <span class="prob-num ${homeWins?'favored':''}">${pct(g.home_prob)}</span>
-          <span class="prob-label-center">predicted win probability</span>
+          <span class="prob-label-center">predicted win probability${g.game_status===1?confLabel(g.home_prob):''}</span>
           <span class="prob-num ${!homeWins?'favored':''}">${pct(g.away_prob)}</span>
         </div>
         <div class="bar-track"><div class="bar-fill ${barDir}" style="width:${barWidth.toFixed(2)}%;background:${barColor}"></div></div>
@@ -416,7 +442,7 @@
       }
       lbl.textContent = `${data.games.length} Game${data.games.length > 1 ? 's' : ''} Today`;
       if (!document.querySelector('.card')) {
-        el.innerHTML = `<div class="games">${data.games.map(card).join('')}</div>`;
+        el.innerHTML = `<div class="games">${sortGames(data.games).map(card).join('')}</div>`;
         updateCharts(data.games);
       }
       updateLiveScores(data.games);
@@ -425,8 +451,34 @@
     }
   }
 
+  async function loadSchedule() {
+    try {
+      const data = await fetch('/api/schedule').then(r => r.json());
+      if (!data.games || data.games.length === 0) return;
+      const byDay = {};
+      data.games.forEach(g => {
+        if (!byDay[g.date]) byDay[g.date] = {disp: g.date_disp, games: []};
+        byDay[g.date].games.push(g);
+      });
+      const html = Object.entries(byDay).map(([d, {disp, games}]) =>
+        `<div class="schedule-day">
+          <div class="schedule-date">${disp}</div>
+          ${games.map(g => `<div class="schedule-game">
+            <span class="schedule-tri" style="color:${COLORS[g.away_tri]||'#1c1917'}">${g.away_tri}</span>
+            <span style="color:var(--ink-3);font-size:.7rem">@</span>
+            <span class="schedule-tri" style="color:${COLORS[g.home_tri]||'#1c1917'}">${g.home_tri}</span>
+            <span class="schedule-time">${g.status}</span>
+          </div>`).join('')}
+        </div>`
+      ).join('');
+      document.getElementById('schedule-section').innerHTML =
+        `<div class="schedule-wrap"><div class="section-label">Upcoming Games</div>${html}</div>`;
+    } catch(e) {}
+  }
+
   load();
   loadAccuracy();
+  loadSchedule();
   setInterval(load, 10 * 1000);
   setInterval(loadAccuracy, 5 * 60 * 1000);
 </script>

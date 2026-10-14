@@ -29,6 +29,7 @@ CORS(app)
 MODELS_DIR   = Path("models")
 RAW          = Path("data/raw")
 SLEEP        = 0.3
+PST          = timezone(timedelta(hours=-7))
 
 GIST_ID      = os.environ.get("GIST_ID", "")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
@@ -749,8 +750,8 @@ def get_boxscore(game_id):
             "away_score":   away_data["statistics"]["points"],
             "home_periods": parse_periods(home_data),
             "away_periods": parse_periods(away_data),
-            "home_players": parse_players(home_data),
-            "away_players": parse_players(away_data),
+            "home_players": parse_players_v3(home_data),
+            "away_players": parse_players_v3(away_data),
         })
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -774,6 +775,30 @@ def predictions():
 @app.route("/api/accuracy")
 def accuracy():
     return jsonify(compute_accuracy())
+
+@app.route("/api/schedule")
+def schedule():
+    """Return games for the next 7 days (excluding today)."""
+    results = []
+    for delta in range(1, 8):
+        d = date.today() + timedelta(days=delta)
+        try:
+            time.sleep(SLEEP)
+            sb = ScoreboardV3(game_date=d.strftime("%m/%d/%Y"), timeout=20)
+            games = sb.get_dict()["scoreboard"]["games"]
+            for g in games:
+                results.append({
+                    "date":      d.isoformat(),
+                    "date_disp": d.strftime("%a %b %-d") if hasattr(d, 'strftime') else d.isoformat(),
+                    "home_tri":  g["homeTeam"]["teamTricode"],
+                    "away_tri":  g["awayTeam"]["teamTricode"],
+                    "home_name": g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"],
+                    "away_name": g["awayTeam"]["teamCity"] + " " + g["awayTeam"]["teamName"],
+                    "status":    g["gameStatusText"],
+                })
+        except Exception as e:
+            print(f"[schedule] {d}: {e}")
+    return jsonify({"games": results})
 
 @app.route("/api/yesterday")
 def yesterday():
