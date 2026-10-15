@@ -829,7 +829,7 @@ _scheduler = BackgroundScheduler()
 _scheduler.add_job(refresh_cache, "interval", seconds=60)
 _scheduler.add_job(refresh_cache, "cron", hour=0, minute=5)
 _scheduler.add_job(
-    lambda: requests.get("https://nba-winner-prediction.onrender.com/api/predictions", timeout=10),
+    lambda: requests.get("https://web-production-438de.up.railway.app/api/predictions", timeout=10),
     "interval", minutes=10
 )
 _scheduler.start()
