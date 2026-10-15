@@ -60,7 +60,7 @@ Trained on 10 seasons (2015-16 to 2024-25) with time-weighted samples — recent
 - APScheduler
 - Chart.js (frontend probability graph)
 - ESPN RSS (team news headlines)
-- GitHub Pages (frontend) + Render (backend)
+- GitHub Pages (frontend) + Railway (backend)
 
 ## Run Locally
 ```bash
