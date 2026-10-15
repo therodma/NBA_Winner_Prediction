@@ -266,9 +266,9 @@
 
     let centerHtml, homeScoreHtml='', awayScoreHtml='', resultBadge='';
     if (g.game_status === 1) {
-      centerHtml = `<span class="vs-text">vs</span><span class="game-time">${g.status}</span>`;
+      centerHtml = `<span class="vs-text">@</span><span class="game-time">${g.status}</span>`;
     } else if (g.game_status === 2) {
-      centerHtml = `<span class="vs-text">vs</span><span class="live-badge">Live</span><span id="status-${g.game_id}" class="game-time">${g.status}</span>`;
+      centerHtml = `<span class="vs-text">@</span><span class="live-badge">Live</span><span id="status-${g.game_id}" class="game-time">${g.status}</span>`;
     } else {
       centerHtml = `<span class="final-badge">Final</span>`;
     }
@@ -331,17 +331,17 @@
     return `<div class="card">
       <div class="matchup">
         <div class="team-block">
-          <span class="team-tri" style="color:${hc}">${g.home_tri}</span>
-          <span class="team-full">${g.home_name}</span>
-          <span class="team-record">${g.home_rec}</span>
-          ${homeScoreHtml}${hB2b}
-        </div>
-        <div class="matchup-center">${centerHtml}${resultBadge}</div>
-        <div class="team-block right">
           <span class="team-tri" style="color:${ac}">${g.away_tri}</span>
           <span class="team-full">${g.away_name}</span>
           <span class="team-record">${g.away_rec}</span>
           ${awayScoreHtml}${aB2b}
+        </div>
+        <div class="matchup-center">${centerHtml}${resultBadge}</div>
+        <div class="team-block right">
+          <span class="team-tri" style="color:${hc}">${g.home_tri}</span>
+          <span class="team-full">${g.home_name}</span>
+          <span class="team-record">${g.home_rec}</span>
+          ${homeScoreHtml}${hB2b}
         </div>
       </div>
       <div class="prob-row">

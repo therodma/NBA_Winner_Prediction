@@ -29,7 +29,11 @@ CORS(app)
 MODELS_DIR   = Path("models")
 RAW          = Path("data/raw")
 SLEEP        = 0.3
-PST          = timezone(timedelta(hours=-7))
+ET           = timezone(timedelta(hours=-5))
+
+def _et_today():
+    """Today's date in Eastern Time (handles UTC servers)."""
+    return datetime.now(ET).date()
 
 GIST_ID      = os.environ.get("GIST_ID", "")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
@@ -331,7 +335,7 @@ def record_final_games(games: list):
     final = [g for g in games if g.get("game_status") == 3 and "pred_winner" in g]
     if not final:
         return
-    today_str = date.today().isoformat()
+    today_str = _et_today().isoformat()
     history = _load_history_file()
     existing = {g["game_id"] for day in history.values() for g in day}
     new_games = [g for g in final if g["game_id"] not in existing]
@@ -687,7 +691,7 @@ def fetch_predictions():
     # ScoreboardV3 is more reliable than the live scoreboard endpoint
     games = []
     try:
-        sb    = ScoreboardV3(game_date=date.today().strftime("%m/%d/%Y"), timeout=30)
+        sb    = ScoreboardV3(game_date=_et_today().strftime("%m/%d/%Y"), timeout=30)
         games = sb.get_dict()["scoreboard"]["games"]
     except Exception as e:
         print(f"[scoreboard] ScoreboardV3 failed: {e}, trying live API")
@@ -746,7 +750,7 @@ def fetch_predictions():
 
             # track prob history for live games — always add point each refresh
             if game_status == 2:
-                ts = datetime.now(PST).strftime("%I:%M")
+                ts = datetime.now(ET).strftime("%I:%M")
                 if game_id not in _prob_history:
                     _prob_history[game_id] = []
                 _prob_history[game_id].append({"t": ts, "home_prob": home_prob})
@@ -805,7 +809,7 @@ def fetch_predictions():
 
 def refresh_cache():
     try:
-        today_str = date.today().isoformat()
+        today_str = _et_today().isoformat()
         with _cache_lock:
             if _cache["date"] != today_str:
                 _cache["data"] = None
@@ -813,7 +817,7 @@ def refresh_cache():
                 _prob_history.clear()
                 print(f"[cache] new day {today_str} — cleared stale games")
         results = fetch_predictions()
-        updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST")
+        updated = datetime.now(ET).strftime("%I:%M %p ET")
         with _cache_lock:
             _cache["data"]    = results
             _cache["updated"] = updated
@@ -840,7 +844,7 @@ print("Scheduler started — cache warming up in background.")
 
 @app.route("/")
 def index():
-    return render_template("index.html", today=date.today().strftime("%B %d, %Y"))
+    return render_template("index.html", today=_et_today().strftime("%B %d, %Y"))
 
 @app.route("/api/boxscore/<game_id>")
 def get_boxscore(game_id):
@@ -873,13 +877,13 @@ def predictions():
     if data is None:
         try:
             data    = fetch_predictions()
-            updated = datetime.now(timezone(timedelta(hours=-7))).strftime("%I:%M %p PST")
+            updated = datetime.now(ET).strftime("%I:%M %p ET")
             with _cache_lock:
                 _cache["data"]    = data
                 _cache["updated"] = updated
         except Exception as e:
             return jsonify({"error": str(e), "games": []})
-    return jsonify({"games": data, "date": date.today().isoformat(), "updated": updated})
+    return jsonify({"games": data, "date": _et_today().isoformat(), "updated": updated})
 
 @app.route("/api/accuracy")
 def accuracy():
@@ -888,13 +892,13 @@ def accuracy():
 @app.route("/api/schedule")
 def schedule():
     """Return games for the next 7 days (excluding today), cached per day."""
-    today_str = date.today().isoformat()
+    today_str = _et_today().isoformat()
     with _cache_lock:
         if _schedule_cache["date"] == today_str and _schedule_cache["data"] is not None:
             return jsonify({"games": _schedule_cache["data"]})
     results = []
     for delta in range(1, 8):
-        d = date.today() + timedelta(days=delta)
+        d = _et_today() + timedelta(days=delta)
         try:
             time.sleep(SLEEP)
             sb = ScoreboardV3(game_date=d.strftime("%m/%d/%Y"), timeout=20)
@@ -920,7 +924,7 @@ def schedule():
 @app.route("/api/yesterday")
 def yesterday():
     history       = load_history()
-    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+    yesterday_str = (_et_today() - timedelta(days=1)).isoformat()
     return jsonify({"games": history.get(yesterday_str, []), "date": yesterday_str})
 
 if __name__ == "__main__":
