@@ -54,7 +54,7 @@ Trained on 10 seasons (2015-16 to 2024-25) with time-weighted samples — recent
 
 ## Stack
 - Python, Flask
-- scikit-learn, XGBoost
+- scikit-learn 1.8.0, XGBoost 3.2.0
 - nba_api (ScoreboardV3, live boxscore)
 - pandas, numpy, joblib
 - APScheduler
