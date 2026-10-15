@@ -133,8 +133,9 @@ TEAM_TIMEZONE = {
 
 # ── in-memory cache ───────────────────────────────────────────────────────────
 
-_cache      = {"data": None, "updated": None, "date": None}
-_cache_lock = threading.Lock()
+_cache        = {"data": None, "updated": None, "date": None}
+_schedule_cache = {"data": None, "date": None}
+_cache_lock   = threading.Lock()
 _prob_history = {}  # {game_id: [{t, home_prob}]}
 
 # ── feature helpers ───────────────────────────────────────────────────────────
@@ -825,7 +826,11 @@ def accuracy():
 
 @app.route("/api/schedule")
 def schedule():
-    """Return games for the next 7 days (excluding today)."""
+    """Return games for the next 7 days (excluding today), cached per day."""
+    today_str = date.today().isoformat()
+    with _cache_lock:
+        if _schedule_cache["date"] == today_str and _schedule_cache["data"] is not None:
+            return jsonify({"games": _schedule_cache["data"]})
     results = []
     for delta in range(1, 8):
         d = date.today() + timedelta(days=delta)
@@ -833,10 +838,11 @@ def schedule():
             time.sleep(SLEEP)
             sb = ScoreboardV3(game_date=d.strftime("%m/%d/%Y"), timeout=20)
             games = sb.get_dict()["scoreboard"]["games"]
+            date_disp = d.strftime("%a %b ") + str(d.day)  # avoids %-d on Windows
             for g in games:
                 results.append({
                     "date":      d.isoformat(),
-                    "date_disp": d.strftime("%a %b %-d") if hasattr(d, 'strftime') else d.isoformat(),
+                    "date_disp": date_disp,
                     "home_tri":  g["homeTeam"]["teamTricode"],
                     "away_tri":  g["awayTeam"]["teamTricode"],
                     "home_name": g["homeTeam"]["teamCity"] + " " + g["homeTeam"]["teamName"],
@@ -845,6 +851,9 @@ def schedule():
                 })
         except Exception as e:
             print(f"[schedule] {d}: {e}")
+    with _cache_lock:
+        _schedule_cache["data"] = results
+        _schedule_cache["date"] = today_str
     return jsonify({"games": results})
 
 @app.route("/api/yesterday")

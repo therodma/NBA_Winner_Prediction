@@ -449,6 +449,7 @@
     } catch(e) {}
   }
 
+  let _lastStatusKey = null;
   async function load() {
     try {
       const data = await fetch(`${API}/api/predictions`).then(r => r.json());
@@ -461,7 +462,9 @@
         return;
       }
       lbl.textContent = `${data.games.length} Game${data.games.length > 1 ? 's' : ''} Today`;
-      if (!document.querySelector('.card')) {
+      const statusKey = data.games.map(g => g.game_id + ':' + g.game_status).join(',');
+      if (statusKey !== _lastStatusKey) {
+        _lastStatusKey = statusKey;
         el.innerHTML = `<div class="games">${sortGames(data.games).map(buildCard).join('')}</div>`;
         updateCharts(data.games);
       }
