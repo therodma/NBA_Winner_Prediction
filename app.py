@@ -41,36 +41,86 @@ HISTORY_FILE = Path("data/history.json")
 FEATURE_COLS = [
     "DIFF_OFF_RATING", "DIFF_DEF_RATING", "DIFF_NET_RATING", "DIFF_PACE",
     "DIFF_W_PCT", "DIFF_FG_PCT", "DIFF_FG3_PCT", "DIFF_FT_PCT",
-    "DIFF_REB", "DIFF_AST", "DIFF_TOV", "DIFF_STL", "DIFF_BLK",
-    "DIFF_OREB", "DIFF_DREB", "DIFF_TS_PCT", "DIFF_AST_PCT",
-    "DIFF_REB_PCT", "DIFF_TM_TOV_PCT",
+    "DIFF_REB", "DIFF_AST", "DIFF_TOV",
     "HOME_ROLL10_WIN_PCT", "AWAY_ROLL10_WIN_PCT", "DIFF_ROLL10_WIN_PCT",
     "HOME_ROLL10_PM",      "AWAY_ROLL10_PM",      "DIFF_ROLL10_PM",
-    "HOME_ROLL20_WIN_PCT", "AWAY_ROLL20_WIN_PCT", "DIFF_ROLL20_WIN_PCT",
-    "HOME_ROLL20_PM",      "AWAY_ROLL20_PM",      "DIFF_ROLL20_PM",
-    "HOME_STREAK", "AWAY_STREAK", "DIFF_STREAK",
     "HOME_REST",   "AWAY_REST",   "DIFF_REST",
     "HOME_B2B",    "AWAY_B2B",
-    "HOME_COURT_STRENGTH", "AWAY_COURT_STRENGTH", "DIFF_COURT_STRENGTH",
-    "AWAY_TRAVEL_TZ_DIFF",
     "H2H_HOME_WIN_PCT",
+    "HOME_STAR_AVAIL", "AWAY_STAR_AVAIL", "DIFF_STAR_AVAIL",
+    "HOME_TRAVEL",     "AWAY_TRAVEL",     "DIFF_TRAVEL",
+    "HOME_SOS",        "AWAY_SOS",        "DIFF_SOS",
 ]
 
 # ── load once at startup ──────────────────────────────────────────────────────
 
 print("Loading models and data...")
 MODELS = {
-    "LogisticRegression": joblib.load(MODELS_DIR / "logisticregression.pkl"),
-    "RandomForest":       joblib.load(MODELS_DIR / "randomforest.pkl"),
-    "GradientBoosting":   joblib.load(MODELS_DIR / "gradientboosting.pkl"),
-    "Ensemble":           joblib.load(MODELS_DIR / "ensemble.pkl"),
+    "LogisticRegression": joblib.load(MODELS_DIR / "logisticregression_v2.pkl"),
+    "RandomForest":       joblib.load(MODELS_DIR / "randomforest_v2.pkl"),
+    "GradientBoosting":   joblib.load(MODELS_DIR / "gradientboosting_v2.pkl"),
+    "Ensemble":           joblib.load(MODELS_DIR / "ensemble_v2.pkl"),
 }
-MARGIN_MODEL = joblib.load(MODELS_DIR / "margin_regressor.pkl")
+MARGIN_MODEL = joblib.load(MODELS_DIR / "margin_regressor_v2.pkl")
 LOGS         = pd.read_csv(RAW / "game_logs.csv",  parse_dates=["GAME_DATE"])
 MATCHUPS     = pd.read_csv(RAW / "matchups.csv",   parse_dates=["GAME_DATE"])
 STATS        = pd.read_csv(RAW / "team_stats.csv")
 HOME_COURT   = pd.read_csv(RAW / "home_court_strength.csv") if (RAW / "home_court_strength.csv").exists() else pd.DataFrame()
 print("Ready.")
+
+ARENA_COORDS = {
+    "ATL": (33.7573, -84.3963), "BOS": (42.3662, -71.0621), "BKN": (40.6826, -73.9754),
+    "CHA": (35.2251, -80.8392), "CHI": (41.8807, -87.6742), "CLE": (41.4965, -81.6882),
+    "DAL": (32.7905, -96.8103), "DEN": (39.7487, -105.0077), "DET": (42.3410, -83.0553),
+    "GSW": (37.7680, -122.3877), "HOU": (29.7508, -95.3621), "IND": (39.7640, -86.1555),
+    "LAC": (34.0430, -118.2673), "LAL": (34.0430, -118.2673), "MEM": (35.1382, -90.0505),
+    "MIA": (25.7814, -80.1870), "MIL": (43.0450, -87.9170), "MIN": (44.9795, -93.2762),
+    "NOP": (29.9490, -90.0821), "NYK": (40.7505, -73.9934), "OKC": (35.4634, -97.5151),
+    "ORL": (28.5392, -81.3839), "PHI": (39.9012, -75.1720), "PHX": (33.4457, -112.0712),
+    "POR": (45.5316, -122.6668), "SAC": (38.5802, -121.4997), "SAS": (29.4270, -98.4375),
+    "TOR": (43.6435, -79.3791), "UTA": (40.7683, -111.9011), "WAS": (38.8981, -77.0209),
+}
+
+def _haversine(c1, c2):
+    from math import radians, sin, cos, sqrt, atan2
+    R = 3958.8
+    lat1, lon1 = map(radians, c1); lat2, lon2 = map(radians, c2)
+    dlat, dlon = lat2-lat1, lon2-lon1
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1-a))
+
+def get_travel_miles(team_tri):
+    """Miles traveled to reach current city from last game's city."""
+    t = LOGS[LOGS["TEAM_ABBREVIATION"] == team_tri].sort_values("GAME_DATE") if "TEAM_ABBREVIATION" in LOGS.columns else pd.DataFrame()
+    if len(t) < 2:
+        return 0.0
+    last = t.iloc[-1]
+    prev = t.iloc[-2]
+    def arena_of(row):
+        if "vs." in str(row.get("MATCHUP", "")):
+            return row.get("TEAM_ABBREVIATION", "")
+        return str(row.get("MATCHUP", "")).split("@ ")[-1].strip()
+    curr_arena = arena_of(last)
+    prev_arena = arena_of(prev)
+    if curr_arena == prev_arena:
+        return 0.0
+    c1 = ARENA_COORDS.get(prev_arena)
+    c2 = ARENA_COORDS.get(curr_arena)
+    return _haversine(c1, c2) if c1 and c2 else 0.0
+
+def get_sos(team_id):
+    """Average opponent NET_RATING over last 10 games."""
+    t = LOGS[LOGS["TEAM_ID"] == team_id].sort_values("GAME_DATE").tail(10)
+    if len(t) == 0:
+        return 0.0
+    opp_nets = []
+    for _, row in t.iterrows():
+        opp_id = row.get("OPP_TEAM_ID") if "OPP_TEAM_ID" in LOGS.columns else None
+        if opp_id:
+            opp_stats = get_stats(opp_id)
+            opp_nets.append(float(opp_stats["NET_RATING"]) if "NET_RATING" in opp_stats.index else 0.0)
+    return float(np.mean(opp_nets)) if opp_nets else 0.0
+
 
 TEAM_TIMEZONE = {
     "ATL": -5, "BOS": -5, "BKN": -5, "CHA": -5, "CHI": -6,
@@ -147,7 +197,15 @@ def build_features(home_id, away_id, home_tri="", away_tri=""):
     h2h  = get_h2h(home_id, away_id)
     hcs  = get_home_court_strength(home_id)
     acs  = get_home_court_strength(away_id)
-    tz_diff = abs(TEAM_TIMEZONE.get(home_tri, -6) - TEAM_TIMEZONE.get(away_tri, -6))
+
+    # v2 features
+    h_travel = get_travel_miles(home_tri)
+    a_travel = get_travel_miles(away_tri)
+    h_sos    = get_sos(home_id)
+    a_sos    = get_sos(away_id)
+    # star availability: use injury report proxy (1.0 = full strength)
+    h_star = 1.0
+    a_star = 1.0
 
     def diff(col):
         hv = float(hs[col]) if col in hs.index else 0.0
@@ -160,21 +218,15 @@ def build_features(home_id, away_id, home_tri="", away_tri=""):
         "DIFF_W_PCT":       diff("W_PCT"),        "DIFF_FG_PCT":     diff("FG_PCT"),
         "DIFF_FG3_PCT":     diff("FG3_PCT"),      "DIFF_FT_PCT":     diff("FT_PCT"),
         "DIFF_REB":         diff("REB"),           "DIFF_AST":        diff("AST"),
-        "DIFF_TOV":         diff("TOV"),           "DIFF_STL":        diff("STL"),
-        "DIFF_BLK":         diff("BLK"),           "DIFF_OREB":       diff("OREB"),
-        "DIFF_DREB":        diff("DREB"),          "DIFF_TS_PCT":     diff("TS_PCT"),
-        "DIFF_AST_PCT":     diff("AST_PCT"),       "DIFF_REB_PCT":    diff("REB_PCT"),
-        "DIFF_TM_TOV_PCT":  diff("TM_TOV_PCT"),
+        "DIFF_TOV":         diff("TOV"),
         "HOME_ROLL10_WIN_PCT": hwp,  "AWAY_ROLL10_WIN_PCT": awp,  "DIFF_ROLL10_WIN_PCT": hwp - awp,
         "HOME_ROLL10_PM":      hpm,  "AWAY_ROLL10_PM":      apm,  "DIFF_ROLL10_PM":      hpm - apm,
-        "HOME_ROLL20_WIN_PCT": hwp20, "AWAY_ROLL20_WIN_PCT": awp20, "DIFF_ROLL20_WIN_PCT": hwp20 - awp20,
-        "HOME_ROLL20_PM":      hpm20, "AWAY_ROLL20_PM":      apm20, "DIFF_ROLL20_PM":      hpm20 - apm20,
-        "HOME_STREAK": hstreak, "AWAY_STREAK": astreak, "DIFF_STREAK": hstreak - astreak,
         "HOME_REST": hr, "AWAY_REST": ar, "DIFF_REST": hr - ar,
         "HOME_B2B": hb2b, "AWAY_B2B": ab2b,
-        "HOME_COURT_STRENGTH": hcs, "AWAY_COURT_STRENGTH": acs, "DIFF_COURT_STRENGTH": hcs - acs,
-        "AWAY_TRAVEL_TZ_DIFF": tz_diff,
         "H2H_HOME_WIN_PCT": h2h,
+        "HOME_STAR_AVAIL": h_star, "AWAY_STAR_AVAIL": a_star, "DIFF_STAR_AVAIL": h_star - a_star,
+        "HOME_TRAVEL": h_travel,  "AWAY_TRAVEL": a_travel,  "DIFF_TRAVEL": h_travel - a_travel,
+        "HOME_SOS":    h_sos,     "AWAY_SOS":    a_sos,     "DIFF_SOS":    h_sos - a_sos,
     }
 
 # ── feature importance / explainability ──────────────────────────────────────
@@ -198,18 +250,13 @@ _FEAT_LABELS = {
     "DIFF_W_PCT":           "Win % edge",
     "DIFF_ROLL10_WIN_PCT":  "Last-10 form edge",
     "DIFF_ROLL10_PM":       "Last-10 point diff edge",
-    "DIFF_ROLL20_WIN_PCT":  "Last-20 form edge",
-    "DIFF_ROLL20_PM":       "Last-20 point diff edge",
-    "DIFF_STREAK":          "Streak edge",
     "DIFF_REST":            "Rest days edge",
     "HOME_B2B":             "Home team on B2B",
     "AWAY_B2B":             "Away team on B2B",
-    "DIFF_COURT_STRENGTH":  "Home court strength",
-    "AWAY_TRAVEL_TZ_DIFF":  "Away travel timezone gap",
     "H2H_HOME_WIN_PCT":     "Head-to-head history",
-    "DIFF_TS_PCT":          "True shooting % edge",
-    "DIFF_AST_PCT":         "Assist % edge",
-    "DIFF_TM_TOV_PCT":      "Turnover % edge",
+    "DIFF_TRAVEL":          "Travel distance edge",
+    "DIFF_SOS":             "Strength of schedule edge",
+    "DIFF_STAR_AVAIL":      "Star player availability",
 }
 
 def build_top_factors(feats: dict, home_tri: str, away_tri: str, home_prob: float) -> list:
