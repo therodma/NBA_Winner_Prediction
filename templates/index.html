@@ -121,7 +121,12 @@
     .factors-wrap{border-top:1px solid var(--border-light);padding:10px 32px;background:var(--bg-card);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .factors-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-right:2px;white-space:nowrap}
     .factor-chip{font-size:.68rem;color:var(--ink-2);background:var(--bg);border:1px solid var(--border-light);border-radius:99px;padding:3px 10px}
-    .recent-wrap{margin-top:32px}
+    .news-wrap{border-top:1px solid var(--border-light);padding:10px 32px;background:var(--bg-card)}
+    .news-label{font-size:.58rem;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+    .news-item{display:block;font-size:.73rem;color:var(--ink-2);text-decoration:none;padding:3px 0;border-bottom:1px solid var(--border-light);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .news-item:last-child{border-bottom:none}
+    .news-item:hover{color:var(--ink)}
+    .news-team{font-size:.58rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-right:6px}
     .recent-table{width:100%;border-collapse:collapse;font-size:.75rem}
     .recent-table th{font-size:.58rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);text-align:left;padding:0 8px 8px 0;border-bottom:1px solid var(--border-light)}
     .recent-table td{padding:7px 8px 7px 0;color:var(--ink-2);border-bottom:1px solid var(--border-light)}
@@ -309,6 +314,14 @@
     const factorsSection = g.game_status === 1 && g.top_factors && g.top_factors.length
       ? `<div class="factors-wrap"><span class="factors-label">Key Factors</span>${g.top_factors.map(f=>`<span class="factor-chip">${f}</span>`).join('')}</div>` : '';
 
+    const newsSection = g.game_status === 1 && ((g.home_news && g.home_news.length) || (g.away_news && g.away_news.length))
+      ? `<div class="news-wrap"><div class="news-label">Team News</div>${
+          [...(g.home_news||[]).map(n => ({...n, tri: g.home_tri})),
+           ...(g.away_news||[]).map(n => ({...n, tri: g.away_tri}))]
+          .map(n => `<a class="news-item" href="${n.link}" target="_blank" rel="noopener">
+            <span class="news-team">${n.tri}</span>${n.title}</a>`).join('')
+        }</div>` : '';
+
     const chartSection = g.game_status === 2
       ? `<div class="chart-wrap"><div class="chart-label">${g.home_tri} vs ${g.away_tri} &mdash; win probability</div><canvas id="chart-${g.game_id}" class="sparkline" width="756" height="56"></canvas></div>` : '';
 
@@ -349,6 +362,7 @@
       ${analysisSection}
       ${injurySection}
       ${scenariosSection}
+      ${newsSection}
       ${chartSection}
       ${bsSection}
     </div>`;

@@ -623,6 +623,64 @@ def build_analysis(home_tri, away_tri, feats, home_prob, home_injuries, away_inj
 
 
 
+# ── news helpers ─────────────────────────────────────────────────────────────
+
+TEAM_NAMES = {
+    "ATL": ["Hawks", "Atlanta"], "BOS": ["Celtics", "Boston"], "BKN": ["Nets", "Brooklyn"],
+    "CHA": ["Hornets", "Charlotte"], "CHI": ["Bulls", "Chicago"], "CLE": ["Cavaliers", "Cleveland"],
+    "DAL": ["Mavericks", "Dallas"], "DEN": ["Nuggets", "Denver"], "DET": ["Pistons", "Detroit"],
+    "GSW": ["Warriors", "Golden State"], "HOU": ["Rockets", "Houston"], "IND": ["Pacers", "Indiana"],
+    "LAC": ["Clippers", "LA Clippers"], "LAL": ["Lakers", "LA Lakers", "Los Angeles Lakers"],
+    "MEM": ["Grizzlies", "Memphis"], "MIA": ["Heat", "Miami"], "MIL": ["Bucks", "Milwaukee"],
+    "MIN": ["Timberwolves", "Minnesota"], "NOP": ["Pelicans", "New Orleans"],
+    "NYK": ["Knicks", "New York"], "OKC": ["Thunder", "Oklahoma City"],
+    "ORL": ["Magic", "Orlando"], "PHI": ["76ers", "Sixers", "Philadelphia"],
+    "PHX": ["Suns", "Phoenix"], "POR": ["Trail Blazers", "Portland"],
+    "SAC": ["Kings", "Sacramento"], "SAS": ["Spurs", "San Antonio"],
+    "TOR": ["Raptors", "Toronto"], "UTA": ["Jazz", "Utah"], "WAS": ["Wizards", "Washington"],
+}
+
+_news_cache = {"items": [], "updated": None}
+
+def fetch_news():
+    try:
+        import xml.etree.ElementTree as ET
+        r = requests.get(
+            "https://www.espn.com/espn/rss/nba/news",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        root = ET.fromstring(r.text)
+        items = []
+        for item in root.findall(".//item"):
+            title = (item.findtext("title") or "").strip()
+            link  = (item.findtext("link") or "").strip()
+            if title and link:
+                items.append({"title": title, "link": link})
+        _news_cache["items"]   = items
+        _news_cache["updated"] = datetime.now(timezone.utc)
+        return items
+    except Exception as e:
+        print(f"[news] fetch error: {e}")
+        return _news_cache["items"]
+
+def get_news():
+    updated = _news_cache["updated"]
+    if updated is None or (datetime.now(timezone.utc) - updated).seconds > 1800:
+        return fetch_news()
+    return _news_cache["items"]
+
+def news_for_team(tri, all_news, max_items=2):
+    keywords = TEAM_NAMES.get(tri, [])
+    results = []
+    for item in all_news:
+        if any(kw.lower() in item["title"].lower() for kw in keywords):
+            results.append(item)
+        if len(results) >= max_items:
+            break
+    return results
+
+
 def fetch_predictions():
     time.sleep(SLEEP)
 
@@ -642,6 +700,7 @@ def fetch_predictions():
 
     injury_report = get_injury_report()
     player_stats  = get_player_stats()
+    all_news      = get_news()
     results = []
     for g in games:
         home_id     = g["homeTeam"]["teamId"]
@@ -728,6 +787,8 @@ def fetch_predictions():
                 "scenarios":      scenarios,
                 "analysis":       analysis,
                 "top_factors":    top_factors,
+                "home_news":      news_for_team(home_tri, all_news) if game_status == 1 else [],
+                "away_news":      news_for_team(away_tri, all_news) if game_status == 1 else [],
             })
         except Exception as e:
             results.append({
